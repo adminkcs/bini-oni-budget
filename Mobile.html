@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>비니네 오니네 가계부 (Mobile)</title>
+  <style>
+    :root { --bg: #F3F5F8; --surface: #FFFFFF; --surface-2: #F8F9FB; --border: #E5E8EE; --text: #1A1A1A; --text-dim: #6B7280; --accent: #0046FF; --ok: #16A55C; --danger: #D62B3F; }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body { background: var(--bg); color: var(--text); padding: 14px 14px 100px; font-family: sans-serif; }
+    
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 8px rgba(0,0,0,0.04); }
+    .title { font-size: 18px; font-weight: bold; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
+    
+    .fab-btn { position: fixed; right: 20px; bottom: 20px; width: 64px; height: 64px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 32px; font-weight: 200; border: none; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 500; display:flex; align-items:center; justify-content:center; }
+    input[type="month"] { width: 100%; padding: 12px; font-size: 16px; font-weight: 600; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); margin-bottom: 12px; box-sizing: border-box; }
+
+    .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+    .summary-box { display: flex; flex-direction: column; gap: 4px; }
+    .summary-label { font-size: 13px; color: var(--text-dim); font-weight: 600; }
+    .summary-val { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+
+    .rank-row { margin-bottom: 14px; }
+    .rank-clickable { cursor: pointer; }  /* [STEP3B] 탭하면 소분류 드릴다운 */
+    .rank-row:last-child { margin-bottom: 0; }
+    .rank-header { display: flex; justify-content: space-between; font-size: 14px; font-weight: 700; margin-bottom: 6px; }
+    .rank-bg { width: 100%; background: var(--surface-2); height: 8px; border-radius: 4px; overflow: hidden; }
+    .rank-fill { height: 100%; border-radius: 4px; background: var(--accent); }
+
+    .acc-group { border: 1px solid var(--border); border-radius: 12px; background: #fff; margin-bottom: 12px; overflow: hidden; }
+    .acc-header { padding: 16px; display: flex; justify-content: space-between; align-items: center; background: var(--surface); cursor: pointer; }
+    .acc-date { font-size: 16px; font-weight: 700; }
+    .acc-count { font-size: 13px; color: var(--text-dim); margin-left: 6px; font-weight: 600; }
+    .acc-total { font-size: 16px; font-weight: 800; }
+    .acc-body { display: none; background: #fafafa; border-top: 1px solid var(--border); }
+    .acc-body.open { display: block; }
+
+    .swipe-container { position: relative; overflow: hidden; border-bottom: 1px solid var(--border); }
+    .swipe-container:last-child { border-bottom: none; }
+    .swipe-content { position: relative; z-index: 2; background: #fafafa; padding: 16px; transition: transform 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); display: flex; justify-content: space-between; align-items: center; }
+    .swipe-actions { position: absolute; top: 0; right: 0; bottom: 0; display: flex; z-index: 1; }
+    .swipe-btn { width: 70px; border: none; color: #fff; font-size: 15px; font-weight: 700; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .swipe-btn.edit { background: var(--accent); }
+    .swipe-btn.delete { background: var(--danger); }
+
+    .txn-cat { font-size: 12px; color: var(--text-dim); font-weight: 600; margin-bottom: 4px; }
+    .txn-name { font-size: 16px; font-weight: 700; }
+    .txn-amt { font-size: 16px; font-weight: 800; }
+  </style>
+</head>
+<body>
+  <input type="month" id="month-filter" onchange="handleMonthChange()">
+
+  <!-- [STEP3B] 내용·비고 검색 -->
+  <input type="search" id="search-input" placeholder="내용·비고 검색" oninput="handleSearchInput(this)"
+         style="width:100%; padding:12px; font-size:16px; border:1px solid var(--border); border-radius:8px; background:var(--surface-2); margin-bottom:12px;">
+
+  <div class="card">
+    <div class="summary-box" style="margin-bottom:16px;">
+      <span class="summary-label">총지출</span>
+      <span class="summary-val" id="m-expense" style="font-size:28px;">0</span>
+      <span id="m-expense-delta"></span>
+    </div>
+    <div class="summary-grid">
+      <div class="summary-box">
+        <span class="summary-label">총수입</span>
+        <span class="summary-val" id="m-income">0</span>
+        <span id="m-income-delta"></span>
+      </div>
+      <div class="summary-box">
+        <span class="summary-label">순잔액</span>
+        <span class="summary-val" id="m-net">0</span>
+        <span id="m-net-delta"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- [STEP3B] 예산 집행률 -->
+  <div class="card">
+    <div class="title">예산 집행률</div>
+    <div id="m-budget"></div>
+  </div>
+
+  <div class="card">
+    <div class="title">
+      <span id="m-chart-title">지출 분석</span>
+      <button type="button" id="m-drill-back" onclick="clearDrilldown()"
+              style="display:none; font-size:12px; font-weight:700; padding:6px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface-2);">← 대분류로</button>
+    </div>
+    <div id="m-ranking"></div>
+  </div>
+
+  <div class="title" style="padding: 0 4px; margin-top:24px;">거래내역</div>
+  <div id="m-accordion"></div>
+
+  <button class="fab-btn" onclick="openRegisterModal()">+</button>
+
+  <input type="hidden" id="start-date"><input type="hidden" id="end-date">
+  <!-- [PERF] 초기 데이터 부트스트랩. doGet이 서버에서 이미 실행되므로 그 자리에서
+       데이터를 심어 보내 getDashboardData 왕복 1회를 없앤다.
+       getBootstrapJson()이 toSafeJson으로 <,>,& 를 유니코드 이스케이프하므로
+       시트 값에 </script> 가 있어도 블록이 끊기지 않는다. 실패 시 null -> 비동기 폴백. -->
+  <script>var BOOTSTRAP = <?!= getBootstrapJson() ?>;</script>
+
+  <?!= include('Common'); ?>
+
+  <script>
+    let openDate = null;
+    let currentSwipe = null;
+    let startX = 0, startY = 0;
+
+    function renderView() {
+      const list = getFilteredTransactions();
+      const exRows = list.filter(t => t.구분 === '지출');
+      const inRows = list.filter(t => t.구분 === '수입');
+      const exSum = exRows.reduce((a,b) => a+Math.abs(b.금액), 0);
+      const inSum = inRows.reduce((a,b) => a+Math.abs(b.금액), 0);
+
+      document.getElementById('m-expense').innerText = formatWon(exSum);
+      document.getElementById('m-income').innerText = formatWon(inSum);
+      document.getElementById('m-net').innerText = formatWon(inSum - exSum);
+      document.getElementById('m-net').style.color = (inSum - exSum < 0) ? 'var(--danger)' : 'var(--text)';
+
+      // [STEP3B] 전월 대비. 필터와 무관하게 '해당 월 전체' 기준으로 비교한다.
+      const ym = currentYearMonth();
+      const cur = monthTotals(ym);
+      const prev = monthTotals(prevYearMonth(ym));
+      document.getElementById('m-expense-delta').innerHTML = deltaHtml(cur.expense, prev.expense, true);
+      document.getElementById('m-income-delta').innerHTML = deltaHtml(cur.income, prev.income, false);
+      document.getElementById('m-net-delta').innerHTML = deltaHtml(cur.net, prev.net, false);
+
+      // [STEP3B] 예산 집행률
+      document.getElementById('m-budget').innerHTML = renderBudgetHtml();
+
+      // [STEP3B] 드릴다운 상태 반영
+      document.getElementById('m-chart-title').innerText =
+        drilldownMain ? `지출 분석 — ${drilldownMain}` : '지출 분석';
+      document.getElementById('m-drill-back').style.display = drilldownMain ? 'inline-block' : 'none';
+
+      // [STEP3B] 드릴다운이면 소분류 기준으로 집계
+      const catSums = groupExpenses(exRows);
+      const sortedCats = Object.entries(catSums).sort((a,b) => b[1] - a[1]);
+
+      let rankHtml = '';
+      sortedCats.forEach(([cat, amt], i) => {
+        const pct = exSum > 0 ? Math.round((amt / exSum) * 100) : 0;
+        rankHtml += `
+          <div class="rank-row ${drilldownMain ? '' : 'rank-clickable'}" ${drilldownMain ? '' : `data-drill="${escapeHtml(cat)}"`}>
+            <div class="rank-header"><span>${escapeHtml(cat)}</span><span>${formatWon(amt)} <span style="color:var(--text-dim); font-size:12px;">${pct}%</span></span></div>
+            <div class="rank-bg"><div class="rank-fill" style="width:${pct}%; background:${paletteAt(i)};"></div></div>
+          </div>
+        `;
+      });
+      if(!rankHtml) rankHtml = '<div style="color:var(--text-dim); font-size:14px;">지출 내역이 없습니다.</div>';
+      const rankBox = document.getElementById('m-ranking');
+      rankBox.innerHTML = rankHtml;
+
+      // [STEP3B] 대분류 탭하면 소분류로 드릴다운
+      if (!drilldownMain) {
+        rankBox.querySelectorAll('[data-drill]').forEach(el =>
+          el.addEventListener('click', () => setDrilldown(el.getAttribute('data-drill'))));
+      }
+
+      renderAccordion(list);
+    }
+
+    function renderAccordion(list) {
+      const groups = {};
+      list.forEach(t => { const d = t.날짜 || '-'; if(!groups[d]) groups[d] = []; groups[d].push(t); });
+      const dates = Object.keys(groups).sort((a,b) => b.localeCompare(a));
+      
+      const todayStr = formatDate(new Date());
+      if(openDate === null && dates.length > 0) openDate = dates.includes(todayStr) ? todayStr : dates[0];
+
+      let accHtml = '';
+      dates.forEach(d => {
+        const rows = groups[d];
+        const daySum = rows.reduce((a,b) => a + b.금액, 0);
+        const isOpen = openDate === d;
+        const icon = isOpen ? '▲' : '▼';
+        const colorClass = daySum < 0 ? 'color:var(--danger)' : 'color:var(--ok)';
+
+        accHtml += `
+          <div class="acc-group">
+            <div class="acc-header" onclick="toggleAcc('${d}')">
+              <div><span class="acc-date">${formatDateLabel(d)}</span><span class="acc-count">${rows.length}건</span></div>
+              <div class="acc-total" style="${colorClass}">${formatWon(daySum)} <span style="font-size:12px; margin-left:4px;">${icon}</span></div>
+            </div>
+            <div class="acc-body ${isOpen ? 'open' : ''}">
+        `;
+
+        rows.forEach(t => {
+          const amtClass = t.금액 < 0 ? 'color:var(--danger)' : 'color:var(--ok)';
+          
+          // [회귀수정] 일련번호 누락 시 버튼 비활성화 방어 적용
+          const idSafe = escapeHtml(t.일련번호 || '');
+          const btnDisabled = !t.일련번호 ? 'disabled style="opacity:0.5;"' : '';
+          if (!t.일련번호) console.warn('[경고] 일련번호가 없는 거래 발견:', t);
+
+          accHtml += `
+            <div class="swipe-container" ontouchstart="ts(event, this)" ontouchmove="tm(event, this)" ontouchend="te(event, this)">
+              <div class="swipe-actions">
+                <button class="swipe-btn edit btn-edit-action" data-id="${idSafe}" ${btnDisabled}>수정</button>
+                <button class="swipe-btn delete btn-delete-action" data-id="${idSafe}" ${btnDisabled}>삭제</button>
+              </div>
+              <div class="swipe-content" data-id="${idSafe}">
+                <div>
+                  <div class="txn-cat">${escapeHtml(t.대분류)} · ${escapeHtml(t.소분류)}</div>
+                  <div class="txn-name">${escapeHtml(t.내용)}</div>
+                </div>
+                <div class="txn-amt" style="${amtClass}">${formatWon(t.금액)}</div>
+              </div>
+            </div>
+          `;
+        });
+        accHtml += `</div></div>`;
+      });
+      document.getElementById('m-accordion').innerHTML = accHtml || '<div style="text-align:center; padding:20px; color:var(--text-dim);">거래내역이 없습니다.</div>';
+    }
+
+    function toggleAcc(dateStr) {
+      openDate = (openDate === dateStr) ? null : dateStr;
+      if(currentSwipe) { currentSwipe.querySelector('.swipe-content').style.transform = 'translateX(0)'; currentSwipe = null; }
+      renderAccordion(getFilteredTransactions());
+    }
+
+    // --- 스와이프 로직 ---
+    function ts(e, el) {
+      startX = e.touches[0].clientX; startY = e.touches[0].clientY;
+      if (currentSwipe && currentSwipe !== el) {
+        currentSwipe.querySelector('.swipe-content').style.transform = 'translateX(0)';
+        currentSwipe = null;
+      }
+    }
+    function tm(e, el) {
+      const diffX = startX - e.touches[0].clientX;
+      const diffY = startY - e.touches[0].clientY;
+      if (Math.abs(diffY) > Math.abs(diffX)) return; 
+      
+      if (diffX > 0 && diffX <= 140) {
+        e.preventDefault();
+        el.querySelector('.swipe-content').style.transform = `translateX(-${diffX}px)`;
+      }
+    }
+    function te(e, el) {
+      const diffX = startX - e.changedTouches[0].clientX;
+      const content = el.querySelector('.swipe-content');
+      
+      if (diffX > 50) { 
+        content.style.transform = 'translateX(-140px)';
+        currentSwipe = el;
+      } else { 
+        content.style.transform = 'translateX(0)';
+        if (currentSwipe === el) currentSwipe = null;
+        // [회귀수정] 비어있는 else if 조건문 완전 삭제 완료
+      }
+    }
+  </script>
+</body>
+</html>

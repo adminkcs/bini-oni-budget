@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <!-- [STEP3] maximum-scale/user-scalable 제거 - 확대 차단은 접근성 위반 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>비니네 오니네 가계부 라우팅</title>
+  <style>
+    body { background: #F3F5F8; font-family: sans-serif; text-align: center; padding: 50px 20px; color: #1A1A1A; }
+    .spinner { margin: 20px auto; width: 40px; height: 40px; border: 3px solid #E5E8EE; border-top: 3px solid #0046FF; border-radius: 50%; animation: spin 0.9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #fallback { display: none; margin-top: 24px; }
+    .go-btn { display: inline-block; background: #0046FF; color: #fff; text-decoration: none; font-weight: 700; font-size: 16px; padding: 14px 28px; border-radius: 10px; }
+    .hint { color: #6B7280; font-size: 13px; margin-top: 14px; line-height: 1.6; }
+  </style>
+</head>
+<body>
+  <h3 id="status">가계부 환경을 확인하고 있습니다...</h3>
+  <div class="spinner" id="spinner"></div>
+
+  <!-- [STEP3] 자동 이동이 막혀도 화면이 멈추지 않도록 수동 진입 경로를 항상 준비한다 -->
+  <div id="fallback">
+    <a id="manual-link" class="go-btn" href="#" target="_top">가계부 열기</a>
+    <div class="hint">
+      자동 이동이 브라우저에 의해 차단되었습니다.<br>
+      위 버튼을 눌러 주세요.
+    </div>
+  </div>
+
+  <script>
+    window.onload = function () {
+      var isMobile = window.innerWidth <= 768 || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+      var base = "<?= ScriptApp.getService().getUrl() ?>";
+      var target = base + (isMobile ? "?view=mobile" : "?view=pc");
+
+      document.getElementById('manual-link').href = target;
+
+      var settled = false;
+      function showManual(reason) {
+        if (settled) return;
+        settled = true;
+        document.getElementById('spinner').style.display = 'none';
+        document.getElementById('status').textContent = '가계부로 이동';
+        document.getElementById('fallback').style.display = 'block';
+        if (reason) console.warn('[라우터] 자동 이동 실패:', reason);
+      }
+
+      // [STEP3] Apps Script는 페이지를 샌드박스 iframe에서 실행한다.
+      //   상위 창 이동(window.top.location)은 차단될 수 있는데, 예외조차 나지 않고
+      //   조용히 무시되는 경우가 있어 화면이 "확인하고 있습니다..."에서 영구히 멈췄다.
+      //   1) 예외는 try/catch로 잡고
+      //   2) 조용히 무시되는 경우는 타임아웃으로 감지해
+      //   어느 쪽이든 사용자가 누를 수 있는 버튼을 보여준다.
+      try {
+        window.top.location.replace(target);
+      } catch (e) {
+        showManual(e && e.message ? e.message : e);
+        return;
+      }
+      setTimeout(function () { showManual('timeout'); }, 1200);
+    };
+  </script>
+</body>
+</html>

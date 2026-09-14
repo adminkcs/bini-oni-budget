@@ -1,0 +1,15 @@
+# 1) 기본적으로 전부 제외
+**/**
+
+# 2) Apps Script 프로젝트 파일만 허용
+!appsscript.json
+!*.js
+!*.gs
+!*.html
+
+# 3) 도구/의존성 파일은 다시 제외 (2번의 *.js 허용이 새어나가지 않도록 마지막에 배치)
+node_modules/**
+package.json
+package-lock.json
+test/**
+scripts/**

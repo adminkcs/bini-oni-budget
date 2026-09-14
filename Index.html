@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>비니네 오니네 가계부 (PC)</title>
+  <!-- [PERF] defer: 차트는 데이터 로드 후에 그리므로 초기 렌더를 막을 이유가 없다 -->
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
+  <style>
+    :root {
+      --bg: #F3F5F8; --surface: #FFFFFF; --surface-2: #F8F9FB; --border: #E5E8EE;
+      --text: #1A1A1A; --text-dim: #6B7280; --accent: #0046FF; --ok: #16A55C; --danger: #D62B3F;
+      --radius: 12px; --shadow-sm: 0 1px 3px rgba(0,0,0,0.06); --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); padding: 20px; font-family: sans-serif; font-size: 14px; }
+    .container { max-width: 1440px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    .fab-btn { position: fixed; right: 30px; bottom: 30px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 32px; border: none; cursor: pointer; box-shadow: var(--shadow-md); z-index: 500; }
+    
+    .filter-bar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; gap: 14px; align-items: center; }
+    input[type="month"], button { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 14px; font-weight: 600; }
+    .scorecards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow-sm); }
+    .scorecard-number { font-size: 28px; font-weight: bold; margin: 8px 0; }
+    .ok { color: var(--ok); } .danger { color: var(--danger); }
+    
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th, td { padding: 10px; border-bottom: 1px solid var(--border); }
+    th { background: var(--surface-2); font-weight: 600; }
+    tbody tr:hover { background: var(--surface-2); }
+    
+    .btn-action { padding: 4px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; border: none; font-weight: 600; color: #fff; }
+    .btn-action.edit { background: var(--accent); }
+    .btn-action.delete { background: var(--danger); margin-left: 4px; }
+    .chart-container { height: 360px; position: relative; }
+
+    /* [STEP3B] 다중 선택 필터 */
+    .ms { position: relative; }
+    .ms-btn { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .ms-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .ms-panel { display: none; position: absolute; top: calc(100% + 6px); left: 0; z-index: 600; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-md); padding: 10px; min-width: 210px; max-height: 300px; overflow-y: auto; }
+    .ms-panel.open { display: block; }
+    .ms-item { display: flex; align-items: center; gap: 8px; padding: 6px 4px; font-size: 14px; font-weight: 500; cursor: pointer; border-radius: 6px; }
+    .ms-item:hover { background: var(--surface-2); }
+    .ms-item input { margin: 0; cursor: pointer; }
+    .ms-actions { display: flex; justify-content: space-between; border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
+    .ms-actions button { font-size: 12px; padding: 5px 10px; cursor: pointer; }
+    .drill-clickable { cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h2>비니네 오니네 가계부 (PC)</h2>
+      <div id="updated-at" style="color:var(--text-dim); font-size:13px;"></div>
+    </header>
+
+    <button type="button" class="fab-btn" onclick="openRegisterModal()">+</button>
+
+    <!-- [STEP3B] 월 선택 + 다중 필터 + 검색 -->
+    <div class="filter-bar">
+      <input type="month" id="month-filter" onchange="handleMonthChange()">
+      <input type="hidden" id="start-date"><input type="hidden" id="end-date">
+
+      <div class="ms" id="ms-대분류"></div>
+      <div class="ms" id="ms-소분류"></div>
+      <div class="ms" id="ms-결제수단"></div>
+
+      <input type="search" id="search-input" placeholder="내용·비고 검색" oninput="handleSearchInput(this)"
+             style="flex:1; min-width:160px; background:var(--surface-2); border:1px solid var(--border); border-radius:8px; padding:8px 12px; font-size:14px;">
+
+      <button type="button" onclick="resetFilters()" style="cursor:pointer;">초기화</button>
+    </div>
+
+    <div class="scorecards">
+      <div class="card">
+        <div style="color:var(--text-dim);">총지출</div>
+        <div class="scorecard-number" id="sc-expense">0</div>
+        <div id="sc-expense-delta"></div>
+      </div>
+      <div class="card">
+        <div style="color:var(--text-dim);">총수입</div>
+        <div class="scorecard-number" id="sc-income">0</div>
+        <div id="sc-income-delta"></div>
+      </div>
+      <div class="card">
+        <div style="color:var(--text-dim);">순잔액</div>
+        <div class="scorecard-number" id="sc-net">0</div>
+        <div id="sc-net-delta"></div>
+      </div>
+      <div class="card">
+        <div style="color:var(--text-dim);">지출건수</div>
+        <div class="scorecard-number" id="sc-count">0</div>
+        <div style="color:var(--text-dim); font-size:12px;" id="sc-count-sub"></div>
+      </div>
+    </div>
+
+    <!-- [STEP3B] 예산 집행률 -->
+    <div class="card">
+      <div style="font-weight:bold; margin-bottom:14px;">예산 집행률</div>
+      <div id="budget-area"></div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:bold; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+        <span id="chart-title">지출 분석 (대분류)</span>
+        <button type="button" id="drill-back" onclick="clearDrilldown()"
+                style="display:none; font-size:12px; padding:6px 12px; cursor:pointer;">← 대분류로</button>
+      </div>
+      <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px;">차트 조각을 클릭하면 소분류로 나눠 봅니다.</div>
+      <div class="chart-container"><canvas id="mainChart"></canvas></div>
+    </div>
+
+    <div class="card">
+      <div style="font-weight:bold; margin-bottom:12px;">거래내역 상세표</div>
+      <div style="max-height: 400px; overflow-y: auto;">
+        <table id="detail-table">
+          <thead>
+            <tr><th>날짜</th><th>대분류</th><th>소분류</th><th>내용</th><th>금액</th><th>결제수단</th><th>비고</th><th>관리</th></tr>
+          </thead>
+          <tbody id="detail-table-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- [PERF] 초기 데이터 부트스트랩. doGet이 서버에서 이미 실행되므로 그 자리에서
+       데이터를 심어 보내 getDashboardData 왕복 1회를 없앤다.
+       getBootstrapJson()이 toSafeJson으로 <,>,& 를 유니코드 이스케이프하므로
+       시트 값에 </script> 가 있어도 블록이 끊기지 않는다. 실패 시 null -> 비동기 폴백. -->
+  <script>var BOOTSTRAP = <?!= getBootstrapJson() ?>;</script>
+
+  <?!= include('Common'); ?>
+
+  <script>
+    let mainChartInstance = null;
+
+    // =========================================================================
+    // [STEP3B] PC 다중 선택 필터
+    //   Common.html이 호출만 하고 정의는 없어 죽은 코드였던
+    //   buildMultiSelectFilters / refreshMsFilter 를 실제로 구현한다.
+    // =========================================================================
+    const MS_KEYS = ['대분류', '소분류', '결제수단'];
+
+    function msOptions(key) {
+      if (key === '결제수단') return paymentOptions.slice();
+      return (categoryOptions[key] || []).slice();
+    }
+
+    function buildMultiSelectFilters() {
+      MS_KEYS.forEach(key => {
+        const wrap = document.getElementById('ms-' + key);
+        if (!wrap) return;
+        wrap.innerHTML =
+          `<button type="button" class="ms-btn" data-ms="${key}">${key}</button>
+           <div class="ms-panel" data-ms-panel="${key}"></div>`;
+        wrap.querySelector('.ms-btn').addEventListener('click', e => {
+          e.stopPropagation();
+          togglePanel(key);
+        });
+        refreshMsFilter(key);
+      });
+
+      // 바깥을 누르면 열린 패널을 닫는다
+      document.addEventListener('click', e => {
+        if (!e.target.closest('.ms')) closeAllPanels();
+      });
+    }
+
+    function togglePanel(key) {
+      const panel = document.querySelector(`[data-ms-panel="${key}"]`);
+      const wasOpen = panel.classList.contains('open');
+      closeAllPanels();
+      if (!wasOpen) panel.classList.add('open');
+    }
+
+    function closeAllPanels() {
+      document.querySelectorAll('.ms-panel').forEach(p => p.classList.remove('open'));
+    }
+
+    function refreshMsFilter(key) {
+      const panel = document.querySelector(`[data-ms-panel="${key}"]`);
+      if (!panel) return;
+      const opts = msOptions(key);
+
+      // 시트에서 사라진 값이 필터에 남아 아무것도 안 보이는 상태를 방지
+      Array.from(filterState[key]).forEach(v => { if (opts.indexOf(v) === -1) filterState[key].delete(v); });
+
+      panel.innerHTML =
+        (opts.length === 0
+          ? '<div style="color:var(--text-dim); font-size:13px; padding:6px 4px;">선택할 항목이 없습니다.</div>'
+          : opts.map(v => `
+              <label class="ms-item">
+                <input type="checkbox" value="${escapeHtml(v)}" ${filterState[key].has(v) ? 'checked' : ''}>
+                <span>${escapeHtml(v)}</span>
+              </label>`).join('')) +
+        `<div class="ms-actions">
+           <button type="button" data-ms-all="${key}">전체 선택</button>
+           <button type="button" data-ms-clear="${key}">해제</button>
+         </div>`;
+
+      panel.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.addEventListener('change', () => {
+          if (cb.checked) filterState[key].add(cb.value);
+          else filterState[key].delete(cb.value);
+          updateMsButton(key);
+          renderView();
+        });
+      });
+      panel.querySelector(`[data-ms-all="${key}"]`).addEventListener('click', () => {
+        opts.forEach(v => filterState[key].add(v));
+        refreshMsFilter(key); renderView();
+      });
+      panel.querySelector(`[data-ms-clear="${key}"]`).addEventListener('click', () => {
+        filterState[key].clear();
+        refreshMsFilter(key); renderView();
+      });
+
+      updateMsButton(key);
+    }
+
+    function refreshMsFilters() { MS_KEYS.forEach(refreshMsFilter); }
+
+    function updateMsButton(key) {
+      const btn = document.querySelector(`[data-ms="${key}"]`);
+      if (!btn) return;
+      const n = filterState[key].size;
+      btn.textContent = n === 0 ? key : `${key} ${n}`;
+      btn.classList.toggle('active', n > 0);
+    }
+
+    function resetFilters() {
+      MS_KEYS.forEach(k => filterState[k].clear());
+      searchKeyword = '';
+      const si = document.getElementById('search-input');
+      if (si) si.value = '';
+      clearDrilldown();      // renderView 포함
+      refreshMsFilters();
+    }
+
+    // =========================================================================
+    // 렌더링
+    // =========================================================================
+    function renderView() {
+      const filtered = getFilteredTransactions();
+      const expenses = filtered.filter(t => t.구분 === '지출');
+      const ex = expenses.reduce((a, b) => a + Math.abs(b.금액), 0);
+      const in_ = filtered.filter(t => t.구분 === '수입').reduce((a, b) => a + Math.abs(b.금액), 0);
+
+      document.getElementById('sc-expense').innerText = formatWon(ex);
+      document.getElementById('sc-income').innerText = formatWon(in_);
+      document.getElementById('sc-net').innerText = formatWon(in_ - ex);
+      document.getElementById('sc-net').className = 'scorecard-number ' + (in_ - ex < 0 ? 'danger' : 'ok');
+      document.getElementById('sc-count').innerText = expenses.length + '건';
+
+      // [STEP3B] 전월 대비. 필터와 무관하게 '해당 월 전체' 기준으로 비교한다.
+      const ym = currentYearMonth();
+      const cur = monthTotals(ym);
+      const prev = monthTotals(prevYearMonth(ym));
+      document.getElementById('sc-expense-delta').innerHTML = deltaHtml(cur.expense, prev.expense, true);
+      document.getElementById('sc-income-delta').innerHTML = deltaHtml(cur.income, prev.income, false);
+      document.getElementById('sc-net-delta').innerHTML = deltaHtml(cur.net, prev.net, false);
+      document.getElementById('sc-count-sub').innerText =
+        (isFiltered() ? '필터 적용됨' : '전체');
+
+      // [STEP3B] 예산 집행률
+      document.getElementById('budget-area').innerHTML = renderBudgetHtml();
+
+      // 드릴다운 상태 반영
+      document.getElementById('chart-title').innerText =
+        drilldownMain ? `지출 분석 — ${drilldownMain} (소분류)` : '지출 분석 (대분류)';
+      document.getElementById('drill-back').style.display = drilldownMain ? 'inline-block' : 'none';
+
+      renderChart(expenses);
+      renderTable(filtered.slice().sort((a, b) => (b.날짜 || '').localeCompare(a.날짜 || '')));
+    }
+
+    function isFiltered() {
+      return MS_KEYS.some(k => filterState[k].size > 0) || !!searchKeyword.trim() || !!drilldownMain;
+    }
+
+    function renderChart(expenses) {
+      const sums = groupExpenses(expenses);   // [STEP3B] 드릴다운이면 소분류 기준
+      const labels = Object.keys(sums);
+      const data = Object.values(sums);
+
+      // [STEP3] CDN 차단/로드 실패 시 차트 영역이 빈 채로 깨지지 않도록 폴백 표시
+      if (typeof Chart === 'undefined') {
+        renderChartFallback(labels, data);
+        return;
+      }
+
+      if (mainChartInstance) mainChartInstance.destroy();
+      mainChartInstance = new Chart(document.getElementById('mainChart'), {
+        type: 'doughnut',
+        // [STEP3] 대분류 수가 PALETTE(8색)를 넘어도 색이 undefined가 되지 않도록 순환
+        data: { labels, datasets: [{ data, backgroundColor: labels.map((_, i) => paletteAt(i)) }] },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          // [STEP3B] 조각 클릭 시 해당 대분류의 소분류로 드릴다운
+          onClick: (evt, elements) => {
+            if (drilldownMain || !elements || elements.length === 0) return;
+            setDrilldown(labels[elements[0].index]);
+          }
+        }
+      });
+    }
+
+    // [STEP3] Chart.js 없이도 읽을 수 있는 대체 표시 (가로 막대)
+    function renderChartFallback(labels, data) {
+      const box = document.querySelector('.chart-container');
+      if (!box) return;
+      const total = data.reduce((a, b) => a + b, 0);
+      if (total === 0) {
+        box.innerHTML = '<div style="color:var(--text-dim); padding:12px;">지출 내역이 없습니다.</div>';
+        return;
+      }
+      box.innerHTML =
+        '<div style="font-size:12px; color:var(--text-dim); margin-bottom:10px;">차트 라이브러리를 불러오지 못해 간단 표시로 대체했습니다.</div>' +
+        labels.map((l, i) => {
+          const pct = Math.round((data[i] / total) * 100);
+          return `<div style="margin-bottom:10px;" class="${drilldownMain ? '' : 'drill-clickable'}" data-drill="${escapeHtml(l)}">
+            <div style="display:flex; justify-content:space-between; font-size:13px; font-weight:600; margin-bottom:4px;">
+              <span>${escapeHtml(l)}</span><span>${formatWon(data[i])} <span style="color:var(--text-dim);">${pct}%</span></span>
+            </div>
+            <div style="background:var(--surface-2); height:8px; border-radius:4px; overflow:hidden;">
+              <div style="width:${pct}%; height:100%; background:${paletteAt(i)};"></div>
+            </div>
+          </div>`;
+        }).join('');
+
+      if (!drilldownMain) {
+        box.querySelectorAll('[data-drill]').forEach(el =>
+          el.addEventListener('click', () => setDrilldown(el.getAttribute('data-drill'))));
+      }
+    }
+
+    function renderTable(list) {
+      const body = document.getElementById('detail-table-body');
+      if (list.length === 0) {
+        body.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--text-dim); padding:24px;">조건에 맞는 거래가 없습니다.</td></tr>';
+        return;
+      }
+      let html = '';
+      list.forEach((t) => {
+        const idSafe = escapeHtml(t.일련번호 || '');
+        const btnDisabled = !t.일련번호 ? 'disabled style="opacity:0.5; cursor:not-allowed;"' : '';
+        if (!t.일련번호) console.warn('[경고] 일련번호가 없는 거래 발견:', t);
+
+        html += `
+          <tr>
+            <td>${escapeHtml(t.날짜)}</td>
+            <td>${escapeHtml(t.대분류)}</td>
+            <td>${escapeHtml(t.소분류)}</td>
+            <td>${escapeHtml(t.내용)}</td>
+            <td class="${t.금액<0?'danger':'ok'}">${formatWon(t.금액)}</td>
+            <td>${escapeHtml(t.결제수단)}</td>
+            <td>${escapeHtml(t.비고||'')}</td>
+            <td>
+              <button class="btn-action edit btn-edit-action" data-id="${idSafe}" ${btnDisabled}>수정</button>
+              <button class="btn-action delete btn-delete-action" data-id="${idSafe}" ${btnDisabled}>삭제</button>
+            </td>
+          </tr>
+        `;
+      });
+      body.innerHTML = html;
+    }
+  </script>
+</body>
+</html>

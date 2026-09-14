@@ -1,0 +1,18 @@
+{
+  "name": "binine-onine-budget",
+  "version": "1.0.0",
+  "scripts": {
+    "login": "clasp login",
+    "whoami": "clasp show-authorized-user",
+    "status": "clasp show-file-status",
+    "pull": "clasp pull",
+    "push": "clasp push",
+    "deployments": "clasp list-deployments",
+    "redeploy": "node scripts/redeploy.mjs",
+    "test": "node test/schedule.test.js && node test/timezone.test.js && node test/audit.test.js && node test/budget.test.js && node test/local-apply.test.js && node test/quickadd.test.js"
+  },
+  "devDependencies": {
+    "@google/clasp": "^3.4.1"
+  },
+  "private": true
+}

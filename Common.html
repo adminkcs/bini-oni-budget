@@ -1,0 +1,799 @@
+<!-- 모달 및 로딩 UI -->
+<div id="loading-overlay" style="position: fixed; inset: 0; background: rgba(243, 245, 248, 0.9); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 9999;">
+  <div style="width: 40px; height: 40px; border: 3px solid #E5E8EE; border-top: 3px solid #0046FF; border-radius: 50%; animation: spin 0.9s linear infinite;"></div>
+  <div id="loading-text" style="margin-top: 14px; color: #1A1A1A; font-weight: 600;">데이터를 불러오는 중입니다...</div>
+  <button id="retry-btn" style="display:none; margin-top: 12px; padding: 8px 16px; border-radius: 8px; border: 1px solid #E5E8EE; cursor:pointer;" onclick="loadData()">다시 시도</button>
+</div>
+
+<div id="register-modal" class="modal-overlay" onclick="if(event.target===this) closeRegisterModal()">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="register-modal-title">신규 등록</h2>
+      <button type="button" class="close-btn" onclick="closeRegisterModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <!-- 구분 토글. 다른 입력란과 달리 라벨이 없어 '입력 항목'으로 인식되지 않는 문제가 있었다. -->
+      <div class="form-group">
+        <label>구분 <span id="reg-type-lock" style="font-weight:400; color:var(--text-dim); display:none;">(수정 시 변경 불가)</span></label>
+        <div class="segmented" id="reg-type-toggle">
+          <button type="button" class="seg-btn active" data-type="지출" onclick="setRegType('지출')">지출</button>
+          <button type="button" class="seg-btn" data-type="수입" onclick="setRegType('수입')">수입</button>
+        </div>
+      </div>
+      <div class="quick-add-wrap" id="quick-add-wrap" style="display:none;">
+        <div class="quick-add-label">자주 쓰는 항목</div>
+        <div class="quick-add-chips" id="quick-add-chips"></div>
+      </div>
+      <div class="form-group">
+        <label>날짜</label>
+        <input type="date" id="reg-date">
+      </div>
+      <div class="form-group">
+        <label>대분류 <span style="font-weight:400; color:var(--text-dim);">(소분류 선택 시 자동)</span></label>
+        <select id="reg-main-cat"></select>
+      </div>
+      <div class="form-group">
+        <label style="display: flex; align-items: center;">
+          소분류 
+          <span id="reg-sub-cat-desc" style="font-weight:400; color:var(--text-dim); display:inline-block; max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 6px;"></span>
+        </label>
+        <select id="reg-sub-cat" onchange="onRegSubCatChange()"></select>
+      </div>
+      <div class="form-group">
+        <label>내용</label>
+        <input type="text" id="reg-content" placeholder="예: 장보기">
+      </div>
+      <div class="form-group">
+        <label>금액 (원)</label>
+        <input type="number" id="reg-amount" min="1" placeholder="숫자만 입력">
+      </div>
+      <div class="form-group">
+        <label>결제수단</label>
+        <select id="reg-payment" onchange="onRegPaymentChange()"></select>
+        <input type="text" id="reg-payment-etc" placeholder="결제수단 직접 입력" style="display:none; margin-top:6px;">
+      </div>
+      <div class="form-group">
+        <label>비고 (선택)</label>
+        <input type="text" id="reg-note">
+      </div>
+      <div id="reg-error"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn-outline" onclick="closeRegisterModal()">취소</button>
+      <button type="button" class="btn-primary-sm" id="reg-save-btn" onclick="submitRegister()">저장</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(26, 26, 26, 0.45); align-items: center; justify-content: center; z-index: 10000; padding: 16px; }
+  .modal-overlay.open { display: flex; }
+  .modal-content { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-md); width: 100%; max-width: 420px; max-height: 90vh; display: flex; flex-direction: column; }
+  .modal-header { padding: 16px 18px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .modal-header h2 { font-size: 17px; font-weight: 700; margin: 0; }
+  .close-btn { background: none; border: none; font-size: 24px; color: var(--text-dim); cursor: pointer; padding: 0; }
+  .modal-body { padding: 18px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 12px; }
+  
+  .modal-footer { padding: 16px 18px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; gap: 12px; flex: none; }
+  .btn-outline, .btn-primary-sm { flex: 1; padding: 14px 20px; font-size: 16px; font-weight: 700; border-radius: 10px; cursor: pointer; text-align: center; }
+  .btn-outline { background: var(--surface); border: 1px solid var(--text-dim); color: var(--text); }
+  .btn-primary-sm { background: var(--accent); border: none; color: #fff; }
+  @media (min-width: 768px) {
+    .modal-footer { justify-content: flex-end; }
+    .btn-outline, .btn-primary-sm { flex: none; min-width: 110px; padding: 12px 20px; }
+  }
+
+  .form-group label { display: block; font-size: 13px; font-weight: 600; color: var(--text-dim); margin-bottom: 6px; }
+  .form-group input, .form-group select { width: 100%; font-size: 15px; padding: 10px; border: 1px solid var(--border); border-radius: 8px; box-sizing: border-box; }
+  .segmented { display: flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  /* 비활성 쪽도 또렷하게 보이도록 대비를 올렸다 (기존: 연회색 바탕 + 연회색 글씨라 잘 안 보였다) */
+  .seg-btn { flex: 1; background: var(--surface); border: none; padding: 12px 10px; font-size: 15px; font-weight: 700; color: var(--text); cursor: pointer; }
+  .seg-btn + .seg-btn { border-left: 1px solid var(--border); }
+  .seg-btn.active { background: var(--accent); color: #fff; }
+  .seg-btn:disabled { cursor: not-allowed; opacity: 0.55; }
+  #reg-error { color: var(--danger); font-size: 13px; min-height: 16px; margin-top: 4px; }
+  .quick-add-wrap { display: flex; flex-direction: column; gap: 6px; }
+  .quick-add-label { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+  .quick-add-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .quick-chip { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 6px 12px; font-size: 13px; cursor: pointer; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* [PERF] 낙관적 UI 알림 — 모달을 즉시 닫으므로 결과는 토스트로 알린다 */
+  #toast { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px);
+           background: #1A1A1A; color: #fff; padding: 13px 20px; border-radius: 10px; font-size: 14px;
+           font-weight: 600; z-index: 11000; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s;
+           max-width: 90vw; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  #toast.error { background: #D62B3F; }
+</style>
+
+<div id="toast"></div>
+
+<script>
+  let rawData = {};
+  let allTransactions = [];
+  let editingTxn = null;
+  let categoryOptions = { 대분류: [], 소분류: [] };
+  let paymentOptions = [];
+  let categoryMap = {};
+  let subCatDescMap = {};
+  let expenseMainCats = [];
+  let subCatToMainCat = {};
+  let regType = '지출';
+  let quickAddItems = [];
+  let isInitialLoad = true;
+  let bootstrapConsumed = false;   // [PERF] doGet이 심어 보낸 초기 데이터 사용 여부
+  let toastTimer = null;
+
+  function showToast(msg, isError) {
+    const el = document.getElementById('toast');
+    if (!el) { if (isError) alert(msg); return; }
+    el.textContent = msg;
+    el.className = 'show' + (isError ? ' error' : '');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.className = ''; }, isError ? 5000 : 2200);
+  }
+
+  // 서버 응답 전 임시 항목인지 판별 (수정/삭제를 막기 위함)
+  function isPendingId(id) { return String(id).indexOf('__tmp_') === 0; }
+
+  const PALETTE = ['#58A6FF', '#3FB950', '#D29922', '#DB6FA1', '#A371F7', '#39C5CF', '#DB8E4A', '#768390'];
+
+  // [STEP3B] 조회 조건 상태
+  const filterState = { 대분류: new Set(), 소분류: new Set(), 결제수단: new Set() };
+  let searchKeyword = '';   // 내용/비고 검색어
+  let drilldownMain = null; // 소분류 드릴다운 대상 대분류 (null이면 대분류 보기)
+  let budgetMap = {};       // { 'YYYY-MM': { 대분류: 예산액 } }
+
+  // [퀵등록] 자주 쓰는 항목 집계 기준
+  const QUICK_ADD_DAYS = 14;  // 최근 2주
+  const QUICK_ADD_MAX = 3;    // 최대 3개
+
+  // 소분류 선택지에 붙는 설명의 최대 길이. 넘으면 …로 줄인다.
+  const SUBCAT_DESC_MAX = 16;
+
+  // 팔레트 색을 인덱스 순환으로 가져온다 (대분류 수가 색 수를 넘어도 undefined 방지)
+  function paletteAt(i) { return PALETTE[i % PALETTE.length]; }
+
+  /**
+   * 소분류 선택지 라벨: "대중교통 (지하철, 버스…)"
+   *
+   * [제약] 네이티브 <select>의 <option>은 내부 글자 크기를 부분적으로 다르게 할 수 없다.
+   *   특히 Android는 드롭다운을 OS가 그려서 CSS가 거의 적용되지 않는다.
+   *   그래서 '설명을 더 작게'는 구현할 수 없고, 대신 괄호 표기 + 글자 수 기준 … 줄임으로 처리한다.
+   *   option의 value는 반드시 순수 소분류명이어야 한다(저장/조회가 이 값을 쓴다).
+   */
+  function subCatOptionLabel(sub) {
+    const desc = String(subCatDescMap[sub] || '').trim();
+    if (!desc) return sub;
+    const short = desc.length > SUBCAT_DESC_MAX
+      ? desc.slice(0, SUBCAT_DESC_MAX - 1) + '…'
+      : desc;
+    return `${sub} (${short})`;
+  }
+
+  function escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  window.addEventListener('DOMContentLoaded', () => { loadData(); });
+
+  document.addEventListener('click', function(e) {
+    const editBtn = e.target.closest('.btn-edit-action');
+    if (editBtn && !editBtn.disabled) {
+      const id = editBtn.getAttribute('data-id');
+      if (!id) return;
+      // [PERF] 낙관적 저장이 아직 서버 확정을 못 받은 항목은 수정/삭제할 수 없다
+      if (isPendingId(id)) { showToast('저장 처리 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
+      const txn = allTransactions.find(t => String(t.일련번호) === String(id));
+      if (txn) openEditModal(txn);
+    }
+    const delBtn = e.target.closest('.btn-delete-action');
+    if (delBtn && !delBtn.disabled) {
+      const id = delBtn.getAttribute('data-id');
+      if (!id) return;
+      if (isPendingId(id)) { showToast('저장 처리 중입니다. 잠시 후 다시 시도해 주세요.'); return; }
+      const txn = allTransactions.find(t => String(t.일련번호) === String(id));
+      if (txn) requestDelete(txn);
+    }
+  });
+
+  function loadData() {
+    // [PERF] 최초 1회는 doGet이 HTML에 심어 보낸 데이터를 그대로 쓴다.
+    //   getDashboardData 왕복(2.6~4.2초)이 통째로 사라진다.
+    //   부트스트랩이 없거나 실패(null)면 기존 비동기 경로로 자동 폴백한다.
+    if (!bootstrapConsumed && typeof BOOTSTRAP !== 'undefined' && BOOTSTRAP) {
+      bootstrapConsumed = true;
+      onDataLoaded(BOOTSTRAP);
+      return;
+    }
+
+    document.getElementById('loading-overlay').style.display = 'flex';
+    document.getElementById('retry-btn').style.display = 'none';
+    document.getElementById('loading-text').innerText = '데이터를 불러오는 중입니다...';
+    
+    if (typeof google === 'undefined') {
+      document.getElementById('loading-text').innerText = 'Apps Script 환경이 아닙니다.';
+      document.getElementById('retry-btn').style.display = 'block';
+      return; 
+    }
+    google.script.run.withSuccessHandler(onDataLoaded).withFailureHandler(onDataError).getDashboardData();
+  }
+
+  function onDataError(err) {
+    document.getElementById('loading-text').innerText = '오류: ' + err.message;
+    document.getElementById('retry-btn').style.display = 'block'; 
+  }
+
+  function onDataLoaded(data) {
+    // [회귀수정] 서버에서 반환한 _error 객체를 정상적으로 화면에 노출 (초기 설정 미완료, 권한 오류 등)
+    if (data._error) {
+      document.getElementById('loading-text').innerText = data._error;
+      document.getElementById('retry-btn').style.display = 'block';
+      return;
+    }
+    if (Object.keys(data).length === 0) {
+      document.getElementById('loading-text').innerText = '데이터를 불러오지 못했습니다.';
+      document.getElementById('retry-btn').style.display = 'block';
+      return;
+    }
+    
+    rawData = data;
+    buildAllTransactions();
+    buildFilterOptions();
+    buildFormOptions();
+    buildQuickAddItems();
+    buildBudgetMap();          // [STEP3B] 예산_설정 파싱
+
+    if (isInitialLoad) {
+      if (typeof buildMultiSelectFilters === 'function') buildMultiSelectFilters(); // [STEP3B] PC 다중 필터
+      initDateRange();
+      isInitialLoad = false;
+    } else if (typeof refreshMsFilters === 'function') {
+      refreshMsFilters();      // [STEP3B] 저장 후 재조회 시 필터 옵션 갱신
+    }
+    document.getElementById('loading-overlay').style.display = 'none';
+    if(document.getElementById('updated-at')) document.getElementById('updated-at').innerText = '최근 갱신: ' + new Date().toLocaleTimeString('ko-KR');
+    if (typeof renderView === 'function') renderView();
+  }
+
+  // [PERF] 서버 응답(전체 조회 / 단건 변경) 모두 같은 형태로 정규화하기 위해 공용화
+  function mapFields(r, type) {
+    const id = r['일련번호'] || r['ID'] || r['id'] || null;
+    return {
+      일련번호: id, 날짜: r['날짜'], 대분류: r['대분류'], 소분류: r['소분류'], 내용: r['내용'],
+      금액: Number(r['금액']) || 0, 결제수단: r['결제수단'], 비고: r['비고'],
+      구분: type || r['구분'], _row: r['_row'] || null
+    };
+  }
+
+  function buildAllTransactions() {
+    const expenses = (rawData['가계부_내역'] || []).map(r => mapFields(r, '지출'));
+    const incomes = (rawData['수입'] || []).map(r => mapFields(r, '수입'));
+    allTransactions = expenses.concat(incomes).filter(t => t.날짜);
+  }
+
+  /**
+   * [PERF] 저장/수정/삭제 후 전체 재조회(getDashboardData)를 하지 않고
+   *   변경된 건만 메모리에 반영한다. 서버 왕복이 2회 -> 1회로 줄어 체감 속도가 절반이 된다.
+   *   시트의 실제 값은 서버가 이미 확정했고, 파생 목록만 다시 계산하면 화면이 일치한다.
+   */
+  function applyLocalChange(kind, payload) {
+    if (kind === 'delete') {
+      allTransactions = allTransactions.filter(t =>
+        !(String(t.일련번호) === String(payload.일련번호) && t.구분 === payload.구분));
+    } else {
+      const txn = mapFields(payload, payload.구분);
+      const i = allTransactions.findIndex(t =>
+        String(t.일련번호) === String(txn.일련번호) && t.구분 === txn.구분);
+      if (i === -1) allTransactions.push(txn);
+      else allTransactions[i] = txn;
+    }
+
+    buildFilterOptions();   // 새 결제수단이 생겼을 수 있다
+    buildQuickAddItems();   // 자주 쓰는 항목 재계산
+    if (typeof refreshMsFilters === 'function') refreshMsFilters();
+    if (typeof renderView === 'function') renderView();
+  }
+
+  function buildFilterOptions() {
+    const catRows = rawData['분류_설정'] || [];
+    categoryOptions.대분류 = [...new Set(catRows.map(r => r['대분류']).filter(Boolean))];
+    categoryOptions.소분류 = [...new Set(catRows.map(r => r['소분류']).filter(Boolean))];
+    paymentOptions = [...new Set(allTransactions.map(t => t.결제수단).filter(Boolean))];
+  }
+
+  function buildFormOptions() {
+    const catRows = rawData['분류_설정'] || [];
+    categoryMap = {}; expenseMainCats = []; subCatToMainCat = {}; subCatDescMap = {};
+    const dupSubCats = []; // [STEP2] 중복 소분류 경고 수집
+    catRows.forEach(r => {
+      const m = r['대분류'], s = r['소분류'], desc = r['설명'];
+      if (!m) return;
+      if (!categoryMap[m]) categoryMap[m] = [];
+      if (s && !categoryMap[m].includes(s)) categoryMap[m].push(s);
+      if (m !== '수입' && !expenseMainCats.includes(m)) expenseMainCats.push(m);
+      if (s) {
+        // [STEP2] 같은 소분류가 서로 다른 대분류에 있으면 뒤에서 덮어써져 잘못된 대분류로
+        //         기록된다. 먼저 정의된 매핑을 유지하고(서버 catMap과 동일 정책) 경고를 남긴다.
+        //         원인 추적은 시트 메뉴 [가계부 도구 > 분류 설정 점검]에서 한다.
+        if (subCatToMainCat[s] === undefined) {
+          subCatToMainCat[s] = m;
+        } else if (subCatToMainCat[s] !== m) {
+          dupSubCats.push(`'${s}' → [${subCatToMainCat[s]}] / [${m}]`);
+        }
+        if (desc) subCatDescMap[s] = desc;
+      }
+    });
+
+    if (dupSubCats.length > 0) {
+      console.warn('[경고] 서로 다른 대분류에 중복된 소분류가 있습니다. 먼저 정의된 대분류로 고정됩니다:\n' + dupSubCats.join('\n'));
+    }
+  }
+
+  // [STEP3B] 기간 + 다중필터 + 검색 + 드릴다운을 모두 적용한다
+  function getFilteredTransactions() {
+    const startDate = document.getElementById('start-date') ? document.getElementById('start-date').value : '';
+    const endDate = document.getElementById('end-date') ? document.getElementById('end-date').value : '';
+    const kw = searchKeyword.trim().toLowerCase();
+
+    return allTransactions.filter(t => {
+      if (startDate && t.날짜 < startDate) return false;
+      if (endDate && t.날짜 > endDate) return false;
+      if (filterState.대분류.size > 0 && !filterState.대분류.has(t.대분류)) return false;
+      if (filterState.소분류.size > 0 && !filterState.소분류.has(t.소분류)) return false;
+      if (filterState.결제수단.size > 0 && !filterState.결제수단.has(t.결제수단)) return false;
+      if (drilldownMain && t.대분류 !== drilldownMain) return false;
+      if (kw) {
+        const hay = ((t.내용 || '') + ' ' + (t.비고 || '')).toLowerCase();
+        if (hay.indexOf(kw) === -1) return false;
+      }
+      return true;
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // [STEP3B] 예산
+  // ---------------------------------------------------------------------------
+  function buildBudgetMap() {
+    budgetMap = {};
+    (rawData['예산_설정'] || []).forEach(r => {
+      const ym = normalizeYearMonth(r['년월']);
+      const main = String(r['대분류'] || '').trim();
+      const amt = Math.abs(Number(r['예산액']) || 0);
+      if (!ym || !main || amt <= 0) return;
+      if (!budgetMap[ym]) budgetMap[ym] = {};
+      budgetMap[ym][main] = (budgetMap[ym][main] || 0) + amt;
+    });
+  }
+
+  // '2026-09' / '2026-9' / Date 문자열 등을 'YYYY-MM'으로 통일
+  function normalizeYearMonth(v) {
+    if (!v) return '';
+    const s = String(v).trim();
+    const m = s.match(/^(\d{4})[-./]?(\d{1,2})/);
+    return m ? `${m[1]}-${String(m[2]).padStart(2, '0')}` : '';
+  }
+
+  function currentYearMonth() {
+    const mf = document.getElementById('month-filter');
+    return mf && mf.value ? mf.value : '';
+  }
+
+  /** 선택된 달의 예산 대비 집행 현황을 계산한다. 예산이 없으면 빈 배열. */
+  function getBudgetProgress() {
+    const ym = currentYearMonth();
+    const budgets = budgetMap[ym];
+    if (!budgets || Object.keys(budgets).length === 0) return [];
+
+    // 집행액은 드릴다운/검색에 흔들리지 않도록 '해당 월 전체 지출' 기준으로 계산한다
+    const spent = {};
+    allTransactions.forEach(t => {
+      if (t.구분 !== '지출' || !t.날짜 || t.날짜.substring(0, 7) !== ym) return;
+      const m = t.대분류 || '기타';
+      spent[m] = (spent[m] || 0) + Math.abs(t.금액);
+    });
+
+    return Object.keys(budgets).map(main => {
+      const budget = budgets[main];
+      const used = spent[main] || 0;
+      const pct = budget > 0 ? (used / budget) * 100 : 0;
+      return { 대분류: main, 예산: budget, 집행: used, 비율: pct, 잔액: budget - used };
+    }).sort((a, b) => b.비율 - a.비율);
+  }
+
+  /** 집행률에 따른 색상: 80% 이상 주황, 100% 초과 빨강 */
+  function budgetColor(pct) {
+    if (pct >= 100) return 'var(--danger)';
+    if (pct >= 80) return '#E8890C';
+    return 'var(--accent)';
+  }
+
+  /** PC/모바일 공용 예산 진행바 HTML */
+  function renderBudgetHtml() {
+    const rows = getBudgetProgress();
+    if (rows.length === 0) {
+      return '<div style="color:var(--text-dim); font-size:13px; line-height:1.7;">' +
+             '이 달의 예산이 설정되지 않았습니다.<br>' +
+             '시트 메뉴 <b>[가계부 도구 &gt; 예산 시트 만들기]</b>로 <b>예산_설정</b> 시트를 만든 뒤 ' +
+             '년월·대분류·예산액을 입력하세요.</div>';
+    }
+    return rows.map(r => {
+      const color = budgetColor(r.비율);
+      const width = Math.min(r.비율, 100);
+      const over = r.잔액 < 0;
+      return `
+        <div style="margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline; font-size:13px; margin-bottom:5px;">
+            <span style="font-weight:700;">${escapeHtml(r.대분류)}</span>
+            <span style="font-weight:600;">
+              ${formatWon(r.집행)} <span style="color:var(--text-dim);">/ ${formatWon(r.예산)}</span>
+              <span style="color:${color}; font-weight:800; margin-left:6px;">${Math.round(r.비율)}%</span>
+            </span>
+          </div>
+          <div style="background:var(--surface-2); height:9px; border-radius:5px; overflow:hidden;">
+            <div style="width:${width}%; height:100%; background:${color}; transition:width .3s;"></div>
+          </div>
+          <div style="font-size:12px; color:${over ? 'var(--danger)' : 'var(--text-dim)'}; margin-top:4px;">
+            ${over ? `예산 초과 ${formatWon(Math.abs(r.잔액))}` : `남은 예산 ${formatWon(r.잔액)}`}
+          </div>
+        </div>`;
+    }).join('');
+  }
+
+  // ---------------------------------------------------------------------------
+  // [STEP3B] 전월 대비 비교 지표
+  // ---------------------------------------------------------------------------
+  function prevYearMonth(ym) {
+    if (!ym) return '';
+    const [y, m] = ym.split('-').map(Number);
+    const d = new Date(y, m - 2, 1); // m-1이 이번달, m-2가 전달
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  }
+
+  /** 특정 월의 총지출/총수입/순잔액. 필터와 무관하게 전체 기준으로 계산한다. */
+  function monthTotals(ym) {
+    let expense = 0, income = 0;
+    if (!ym) return { expense, income, net: 0 };
+    allTransactions.forEach(t => {
+      if (!t.날짜 || t.날짜.substring(0, 7) !== ym) return;
+      if (t.구분 === '지출') expense += Math.abs(t.금액);
+      else income += Math.abs(t.금액);
+    });
+    return { expense, income, net: income - expense };
+  }
+
+  /**
+   * 전월 대비 증감 표시 HTML.
+   * invert=true 이면 증가가 나쁜 지표(지출) — 증가를 빨강으로 표시한다.
+   */
+  function deltaHtml(cur, prev, invert) {
+    if (prev === 0) {
+      return '<span style="color:var(--text-dim); font-size:12px;">전월 데이터 없음</span>';
+    }
+    const diff = cur - prev;
+    if (diff === 0) return '<span style="color:var(--text-dim); font-size:12px;">전월과 동일</span>';
+
+    const rate = Math.abs(diff / prev) * 100;
+    const up = diff > 0;
+    const bad = invert ? up : !up;
+    const color = bad ? 'var(--danger)' : 'var(--ok)';
+    return `<span style="color:${color}; font-size:12px; font-weight:700;">` +
+           `${up ? '▲' : '▼'} ${formatWon(Math.abs(diff))} (${rate.toFixed(1)}%)</span>` +
+           `<span style="color:var(--text-dim); font-size:12px;"> 전월 대비</span>`;
+  }
+
+  // ---------------------------------------------------------------------------
+  // [STEP3B] 드릴다운 · 검색
+  // ---------------------------------------------------------------------------
+  function setDrilldown(mainCat) {
+    drilldownMain = (drilldownMain === mainCat) ? null : mainCat;
+    if (typeof renderView === 'function') renderView();
+  }
+
+  function clearDrilldown() {
+    drilldownMain = null;
+    if (typeof renderView === 'function') renderView();
+  }
+
+  /** 드릴다운 중이면 소분류 기준, 아니면 대분류 기준으로 지출을 집계한다 */
+  function groupExpenses(expenses) {
+    const key = drilldownMain ? '소분류' : '대분류';
+    const sums = {};
+    expenses.forEach(t => {
+      const k = t[key] || '기타';
+      sums[k] = (sums[k] || 0) + Math.abs(t.금액);
+    });
+    return sums;
+  }
+
+  function handleSearchInput(el) {
+    searchKeyword = el.value || '';
+    if (typeof renderView === 'function') renderView();
+  }
+
+  function initDateRange() {
+    const dates = allTransactions.map(t => t.날짜).filter(Boolean).sort();
+    let targetMonth = "";
+    if (dates.length > 0) {
+      targetMonth = dates[dates.length - 1].substring(0, 7);
+    } else {
+      const now = new Date();
+      targetMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
+    }
+    const mf = document.getElementById('month-filter');
+    if (mf) { mf.value = targetMonth; handleMonthChange(); }
+  }
+
+  function handleMonthChange() {
+    const monthVal = document.getElementById('month-filter').value;
+    if (!monthVal) return;
+    drilldownMain = null; // [STEP3B] 달을 바꾸면 드릴다운은 해제한다
+    const year = parseInt(monthVal.split('-')[0], 10);
+    const month = parseInt(monthVal.split('-')[1], 10);
+    if (document.getElementById('start-date')) document.getElementById('start-date').value = `${year}-${String(month).padStart(2, '0')}-01`;
+    if (document.getElementById('end-date')) document.getElementById('end-date').value = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+    if (typeof renderView === 'function') renderView();
+  }
+
+  function formatDate(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+  function formatDateLabel(dateStr) { return (!dateStr || dateStr === '-') ? '-' : dateStr.replace(/-/g, '.') + '.'; }
+  function formatWon(n) { return (n === null || isNaN(n)) ? '-' : (n < 0 ? '-' : '') + '₩' + Math.round(Math.abs(n)).toLocaleString('ko-KR'); }
+
+  function openRegisterModal() {
+    editingTxn = null;
+    document.getElementById('register-modal-title').innerText = '신규 등록';
+    document.getElementById('reg-save-btn').innerText = '저장';
+    document.querySelectorAll('#reg-type-toggle .seg-btn').forEach(b => b.disabled = false);
+    document.getElementById('reg-type-lock').style.display = 'none';
+    document.getElementById('reg-error').innerText = '';
+    document.getElementById('reg-date').value = formatDate(new Date());
+    document.getElementById('reg-content').value = '';
+    document.getElementById('reg-amount').value = '';
+    document.getElementById('reg-note').value = '';
+    document.getElementById('reg-payment-etc').value = '';
+    document.getElementById('reg-payment-etc').style.display = 'none';
+    setRegType('지출');
+    document.getElementById('register-modal').classList.add('open');
+  }
+
+  function openEditModal(txn) {
+    if (!txn) return;
+    editingTxn = txn;
+    document.getElementById('register-modal-title').innerText = '거래 수정';
+    document.getElementById('reg-save-btn').innerText = '수정 저장';
+    document.getElementById('reg-error').innerText = '';
+    setRegType(txn.구분);
+    document.querySelectorAll('#reg-type-toggle .seg-btn').forEach(b => b.disabled = true);
+    document.getElementById('reg-type-lock').style.display = 'inline';
+    document.getElementById('quick-add-wrap').style.display = 'none';
+    document.getElementById('reg-date').value = txn.날짜 || '';
+    
+    ensureSubCatOption(txn.소분류);
+    document.getElementById('reg-sub-cat').value = txn.소분류 || '';
+    onRegSubCatChange();
+    if (!subCatToMainCat[txn.소분류] && txn.대분류) document.getElementById('reg-main-cat').value = txn.대분류;
+    
+    document.getElementById('reg-content').value = txn.내용 || '';
+    document.getElementById('reg-amount').value = Math.abs(txn.금액 || 0);
+    document.getElementById('reg-note').value = txn.비고 || '';
+
+    const paySel = document.getElementById('reg-payment');
+    if (Array.from(paySel.options).some(o => o.value === txn.결제수단)) paySel.value = txn.결제수단;
+    else { paySel.value = '__etc__'; document.getElementById('reg-payment-etc').value = txn.결제수단 || ''; }
+    onRegPaymentChange();
+    document.getElementById('register-modal').classList.add('open');
+  }
+
+  /**
+   * [PERF] 낙관적 삭제 — 서버 응답을 기다리지 않고 화면에서 먼저 지운다.
+   *   서버가 실패를 알리면 원래 항목을 되돌리고 사유를 토스트로 보여준다.
+   *   소프트 삭제라 서버 쪽 되돌리기도 안전하다(행이 실제로 사라지지 않음).
+   */
+  function requestDelete(txn) {
+    if (!confirm(`'${txn.내용}' 거래를 정말 삭제하시겠습니까?`)) return;
+
+    const snapshot = Object.assign({}, txn); // 실패 시 복원용
+    applyLocalChange('delete', { 일련번호: txn.일련번호, 구분: txn.구분 });
+
+    function rollback(msg) {
+      applyLocalChange('save', snapshot);
+      showToast('삭제 실패: ' + msg, true);
+    }
+
+    google.script.run
+      .withSuccessHandler(res => { if (!res || !res.ok) rollback(res && res.message ? res.message : '알 수 없는 오류'); })
+      .withFailureHandler(err => rollback(err && err.message ? err.message : String(err)))
+      .deleteTransaction(txn);
+  }
+
+  function closeRegisterModal() { document.getElementById('register-modal').classList.remove('open'); }
+
+  function setRegType(type) {
+    regType = type;
+    document.querySelectorAll('#reg-type-toggle .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.type === type));
+    const mainSelect = document.getElementById('reg-main-cat');
+    mainSelect.innerHTML = '';
+    const cats = type === '수입' ? ['수입'] : expenseMainCats;
+    cats.forEach(c => mainSelect.appendChild(new Option(c, c)));
+    mainSelect.disabled = true;
+
+    const subSelect = document.getElementById('reg-sub-cat');
+    subSelect.innerHTML = '';
+    const subs = [];
+    cats.forEach(m => (categoryMap[m] || []).forEach(s => { if (!subs.includes(s)) subs.push(s); }));
+    subs.forEach(s => subSelect.appendChild(new Option(subCatOptionLabel(s), s))); // 표시는 설명 포함, 값은 소분류명
+    onRegSubCatChange(); renderPaymentOptions(); renderQuickAddChips();
+  }
+
+  function onRegSubCatChange() {
+    const subCat = document.getElementById('reg-sub-cat').value;
+    if (subCatToMainCat[subCat]) document.getElementById('reg-main-cat').value = subCatToMainCat[subCat];
+    const descEl = document.getElementById('reg-sub-cat-desc');
+    descEl.innerText = subCatDescMap[subCat] ? '(' + subCatDescMap[subCat] + ')' : '';
+  }
+
+  function ensureSubCatOption(subCat) {
+    if (!subCat) return;
+    const subSelect = document.getElementById('reg-sub-cat');
+    if (!Array.from(subSelect.options).some(o => o.value === subCat)) subSelect.appendChild(new Option(subCatOptionLabel(subCat), subCat));
+  }
+
+  function renderPaymentOptions() {
+    const sel = document.getElementById('reg-payment');
+    sel.innerHTML = '';
+    paymentOptions.forEach(p => sel.appendChild(new Option(p, p)));
+    sel.appendChild(new Option('직접 입력', '__etc__'));
+    sel.value = paymentOptions[0] || '__etc__';
+    onRegPaymentChange();
+  }
+
+  function onRegPaymentChange() { document.getElementById('reg-payment-etc').style.display = document.getElementById('reg-payment').value === '__etc__' ? 'block' : 'none'; }
+
+  function submitRegister() {
+    const errorEl = document.getElementById('reg-error');
+    errorEl.innerText = '';
+    const date = document.getElementById('reg-date').value;
+    const mainCat = document.getElementById('reg-main-cat').value;
+    const subCat = document.getElementById('reg-sub-cat').value;
+    const content = document.getElementById('reg-content').value.trim();
+    const amount = Number(document.getElementById('reg-amount').value);
+    const paymentSel = document.getElementById('reg-payment').value;
+    const payment = paymentSel === '__etc__' ? document.getElementById('reg-payment-etc').value.trim() : paymentSel;
+    const note = document.getElementById('reg-note').value.trim();
+
+    if (!date || !mainCat || !subCat || !amount || amount <= 0 || !payment) { errorEl.innerText = '필수 항목을 모두 입력해 주세요.'; return; }
+
+    const payload = { 구분: regType, 날짜: date, 대분류: mainCat, 소분류: subCat, 내용: content, 금액: amount, 결제수단: payment, 비고: note };
+    // 서버의 normalizeAmount와 같은 규칙으로 부호를 맞춰 화면에 먼저 반영한다
+    const signed = regType === '지출' ? -Math.abs(amount) : Math.abs(amount);
+
+    /**
+     * [PERF] 낙관적 UI — 서버 응답(1~2초)을 기다리지 않고 모달을 닫고 화면을 먼저 갱신한다.
+     *   입력 검증은 위에서 이미 끝났으므로 실패 확률이 낮고, 실패하면 되돌린 뒤 토스트로 알린다.
+     */
+    if (editingTxn) {
+      const prev = Object.assign({}, editingTxn);   // 실패 시 복원용
+      payload.일련번호 = editingTxn.일련번호;
+      closeRegisterModal();
+      applyLocalChange('update', Object.assign({}, payload, { 금액: signed }));
+
+      google.script.run
+        .withSuccessHandler(res => {
+          if (res && res.ok) { if (res.txn) applyLocalChange('update', res.txn); }
+          else {
+            applyLocalChange('update', prev);
+            showToast('수정 실패: ' + (res && res.message ? res.message : '알 수 없는 오류'), true);
+          }
+        })
+        .withFailureHandler(err => {
+          applyLocalChange('update', prev);
+          showToast('수정 실패: ' + (err && err.message ? err.message : String(err)), true);
+        })
+        .updateTransaction(payload);
+
+    } else {
+      // 일련번호는 서버가 만든다. 임시 ID로 먼저 표시하고 응답이 오면 확정 행으로 교체한다.
+      const tempId = '__tmp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+      closeRegisterModal();
+      applyLocalChange('save', Object.assign({}, payload, { 일련번호: tempId, 금액: signed }));
+
+      const removeTemp = () => applyLocalChange('delete', { 일련번호: tempId, 구분: payload.구분 });
+
+      google.script.run
+        .withSuccessHandler(res => {
+          removeTemp();
+          if (res && res.ok) applyLocalChange('save', res.txn || Object.assign({}, payload, { 금액: signed }));
+          else showToast('저장 실패: ' + (res && res.message ? res.message : '알 수 없는 오류'), true);
+        })
+        .withFailureHandler(err => {
+          removeTemp();
+          showToast('저장 실패: ' + (err && err.message ? err.message : String(err)), true);
+        })
+        .saveTransaction(payload);
+    }
+  }
+
+  /**
+   * 자주 쓰는 항목 집계 — '소분류' 단위
+   *   - 최근 QUICK_ADD_DAYS(14)일 이내 지출만 대상. 오래된 습관이 계속 떠 있지 않게 한다.
+   *   - '정기_수입지출_설정_및_휴일기준'에 등록된 소분류는 제외한다.
+   *     정기 항목은 자동 입력되므로 빠른 등록 후보로서 의미가 없다.
+   *   - 사용 횟수 내림차순, 동률이면 최근 사용순.
+   *   [변경] 내용(예: '점심 김밥')이 아니라 소분류(예: '대중교통')로 묶는다.
+   *     내용은 매번 달라지지만 소분류는 반복되므로 빠른 입력에 더 맞는다.
+   */
+  function buildQuickAddItems() {
+    const regularSubCats = new Set(
+      (rawData['_정기소분류'] || []).map(v => String(v).trim()).filter(Boolean)
+    );
+
+    const from = new Date();
+    from.setDate(from.getDate() - (QUICK_ADD_DAYS - 1)); // 오늘 포함 14일
+    const since = formatDate(from);
+
+    const freq = {};
+    allTransactions.forEach(t => {
+      if (t.구분 !== '지출') return;
+      if (!t.날짜 || t.날짜 < since) return;              // 최근 2주만
+      const name = String(t.소분류 || '').trim();         // [변경] 소분류 기준
+      if (!name || regularSubCats.has(name)) return;      // 정기 등록 소분류 제외
+
+      // [STEP2] 비고 형식이 "정기지출 자동입력#<정기항목ID>"로 바뀌어 === 비교가 무력해졌다.
+      //         이름이 달라도 자동입력 행은 제외되도록 startsWith로 한 번 더 막는다.
+      const note = String(t.비고 || '');
+      if (note.startsWith('정기지출 자동입력') || note.startsWith('정기수입 자동입력')) return;
+
+      if (!freq[name]) freq[name] = { count: 0, latest: t };
+      freq[name].count++;
+      if (t.날짜 >= freq[name].latest.날짜) freq[name].latest = t;
+    });
+
+    // [버그수정] 집계 객체가 아니라 실제 거래를 담아야 한다.
+    //   기존에는 {count, latest}를 그대로 넣어 item.내용이 undefined가 되면서
+    //   칩이 '글자 없는 빈 버튼'으로 그려졌다(= 화면에서 안 보임).
+    quickAddItems = Object.values(freq)
+      .sort((a, b) => (b.count - a.count) ||
+                      String(b.latest.날짜).localeCompare(String(a.latest.날짜)))
+      .slice(0, QUICK_ADD_MAX)
+      .map(v => v.latest);
+  }
+
+  function renderQuickAddChips() {
+    const wrap = document.getElementById('quick-add-wrap');
+    if (regType !== '지출') { wrap.style.display = 'none'; return; }
+    wrap.style.display = 'flex';
+
+    const box = document.getElementById('quick-add-chips');
+    // 후보가 없을 때 영역을 통째로 숨기면 '고장인지 데이터가 없는 건지' 구분이 안 되므로 사유를 표시한다
+    if (quickAddItems.length === 0) {
+      box.innerHTML = `<span style="font-size:12px; color:var(--text-dim);">최근 ${QUICK_ADD_DAYS}일 내 반복 사용한 소분류가 없습니다.</span>`;
+      return;
+    }
+    box.innerHTML = quickAddItems.map((item, idx) =>
+      `<button type="button" class="quick-chip" onclick="applyQuickAdd(${idx})">${escapeHtml(item.소분류)}</button>`
+    ).join('');
+  }
+
+  function applyQuickAdd(idx) {
+    const item = quickAddItems[idx];
+    if (!item) return;
+    ensureSubCatOption(item.소분류);
+    document.getElementById('reg-sub-cat').value = item.소분류;
+    onRegSubCatChange();
+    const paySel = document.getElementById('reg-payment');
+    if (Array.from(paySel.options).some(o => o.value === item.결제수단)) paySel.value = item.결제수단;
+    else { paySel.value = '__etc__'; document.getElementById('reg-payment-etc').value = item.결제수단 || ''; }
+    onRegPaymentChange();
+    // [변경] 칩이 소분류 기준이라 내용은 매번 달라진다. 비우고 내용에 포커스를 준다.
+    document.getElementById('reg-content').value = '';
+    document.getElementById('reg-amount').value = '';
+    document.getElementById('reg-content').focus();
+  }
+</script>
