@@ -162,7 +162,15 @@ function toSafeJson(obj) {
  */
 function getBootstrapJson() {
   try {
-    return toSafeJson(getDashboardData());
+    // [계측] 초기 로딩이 느린 원인을 추정하지 않고 구간별로 재서 로그에 남긴다.
+    var t0 = Date.now();
+    var data = getDashboardData();
+    var t1 = Date.now();
+    var json = toSafeJson(data);
+    var t2 = Date.now();
+    Logger.log('[계측] 시트읽기 ' + (t1 - t0) + 'ms | 직렬화 ' + (t2 - t1) +
+               'ms | JSON ' + Math.round(json.length / 1024) + 'KB');
+    return json;
   } catch (e) {
     Logger.log('[부트스트랩 실패] ' + (e && e.message ? e.message : e));
     return 'null';
@@ -201,7 +209,10 @@ function getDashboardData(includeArchive = false) {
     return s;
   }
 
+  const timing = []; // [계측] 시트별 소요 시간
+
   TARGET_TABS.forEach(function (tabName) {
+    const ts = Date.now();
     const sheet = ss.getSheetByName(tabName);
     if (!sheet) { result[tabName] = []; return; }
     const lastRow = sheet.getLastRow();
@@ -238,7 +249,9 @@ function getDashboardData(includeArchive = false) {
       if (!isEmptyRow) data.push(rowData);
     }
     result[tabName] = data;
+    timing.push(tabName + ' ' + data.length + '행 ' + (Date.now() - ts) + 'ms(' + lastRow + 'x' + lastCol + ')');
   });
+  Logger.log('[계측] ' + timing.join(' | '));
 
   // [퀵등록] '자주 쓰는 항목'은 소분류 단위로 집계하며, 정기 등록분은 제외한다.
   //   그 판별을 위해 정기 시트의 '소분류'(D열) 한 컬럼만 가볍게 읽어 내려보낸다.
