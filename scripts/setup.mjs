@@ -23,7 +23,10 @@ function fail(msg) {
 
 function runClasp(args) {
   const r = spawnSync(npx, ['clasp', ...args], { encoding: 'utf8' });
-  return ((r.stdout || '') + (r.stderr || '')).trim();
+  return {
+    ok: r.status === 0,
+    out: ((r.stdout || '') + (r.stderr || '')).trim()
+  };
 }
 
 const scriptId = (process.argv[2] || '').trim();
@@ -58,23 +61,33 @@ if (existsSync('.clasp.json')) {
   console.log('✅ .clasp.json 생성');
 }
 
-// ── 2) clasp 로그인 확인 ─────────────────────────────────────────
+// ── 2) clasp 설치·로그인 확인 ────────────────────────────────────
+// '미설치'와 '미로그인'은 해결 방법이 달라 구분해서 안내한다
+if (!existsSync('node_modules/@google/clasp')) {
+  console.log('\n·  clasp가 설치되지 않았습니다. 먼저 아래를 실행하세요.\n');
+  console.log('     npm install\n');
+  console.log('   그다음 이 명령을 다시 실행하면 .clasp-prod 까지 설정됩니다.\n');
+  process.exit(0);
+}
+
 const who = runClasp(['show-authorized-user']);
-if (!/logged in as/i.test(who)) {
+if (!who.ok || !/logged in as/i.test(who.out)) {
   console.log('\n·  clasp 로그인이 필요합니다. 아래를 실행한 뒤 이 명령을 다시 실행하세요.\n');
   console.log('     npx clasp login\n');
   console.log('   (브라우저가 열립니다. 가계부 시트 소유 계정으로 승인하세요)\n');
   process.exit(0);
 }
-console.log('✅ ' + who.split('\n')[0]);
+console.log('✅ ' + who.out.split('\n')[0]);
 
 // ── 3) .clasp-prod (운영 배포 ID) ────────────────────────────────
 if (existsSync('.clasp-prod') && readFileSync('.clasp-prod', 'utf8').trim()) {
   console.log('·  .clasp-prod 이미 있음 — 건너뜀');
 } else {
-  const raw = runClasp(['list-deployments', '--json']);
+  const dep = runClasp(['list-deployments', '--json']);
+  const raw = dep.out;
   let list = [];
   try {
+    if (!dep.ok) throw new Error(raw);
     list = JSON.parse(raw.slice(raw.indexOf('['), raw.lastIndexOf(']') + 1));
   } catch (e) {
     console.log('\n·  배포 목록을 읽지 못했습니다. 아래로 직접 확인해 .clasp-prod 에 한 줄로 저장하세요.\n');
