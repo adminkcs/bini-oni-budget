@@ -148,7 +148,12 @@ function doGet(e) {
  * ==============================================================================
  */
 function toSafeJson(obj) {
-  return JSON.stringify(obj)
+  return escapeForScriptTag(JSON.stringify(obj));
+}
+
+/** 이미 만들어진 JSON 문자열을 <script> 안에 넣어도 안전하게 이스케이프한다 */
+function escapeForScriptTag(json) {
+  return String(json)
     .replace(/</g, '\\u003c')      // </script> 로 블록을 끊는 것을 차단
     .replace(/>/g, '\\u003e')
     .replace(/&/g, '\\u0026')
@@ -162,15 +167,7 @@ function toSafeJson(obj) {
  */
 function getBootstrapJson() {
   try {
-    // [계측] 초기 로딩이 느린 원인을 추정하지 않고 구간별로 재서 로그에 남긴다.
-    var t0 = Date.now();
-    var data = getDashboardData();
-    var t1 = Date.now();
-    var json = toSafeJson(data);
-    var t2 = Date.now();
-    Logger.log('[계측] 시트읽기 ' + (t1 - t0) + 'ms | 직렬화 ' + (t2 - t1) +
-               'ms | JSON ' + Math.round(json.length / 1024) + 'KB');
-    return json;
+    return toSafeJson(getDashboardData());
   } catch (e) {
     Logger.log('[부트스트랩 실패] ' + (e && e.message ? e.message : e));
     return 'null';
@@ -219,10 +216,7 @@ function getDashboardData(includeArchive = false) {
   const sheetByName = {};
   ss.getSheets().forEach(function (sh) { sheetByName[sh.getName()] = sh; });
 
-  const timing = []; // [계측] 시트별 소요 시간
-
   TARGET_TABS.forEach(function (tabName) {
-    const ts = Date.now();
     const sheet = sheetByName[tabName];
     if (!sheet) { result[tabName] = []; return; }
 
@@ -257,7 +251,6 @@ function getDashboardData(includeArchive = false) {
       if (!isEmptyRow) data.push(rowData);
     }
     result[tabName] = data;
-    timing.push(tabName + ' ' + data.length + '행 ' + (Date.now() - ts) + 'ms');
   });
 
   // [퀵등록] '자주 쓰는 항목'은 소분류 단위로 집계하며, 정기 등록분은 제외한다.
@@ -268,16 +261,13 @@ function getDashboardData(includeArchive = false) {
   result['_정기소분류'] = [];
   const regSheet = sheetByName[SHEET_REGULAR];
   if (regSheet) {
-    const regTs = Date.now();
     const regRows = regSheet.getDataRange().getValues();
     for (let i = 1; i < regRows.length; i++) {
       const sub = String(regRows[i][COL.SUB - 1] || '').trim();  // D열 = 소분류
       if (sub) result['_정기소분류'].push(sub);
     }
-    timing.push('정기소분류 ' + result['_정기소분류'].length + '개 ' + (Date.now() - regTs) + 'ms');
   }
 
-  Logger.log('[계측] ' + timing.join(' | '));
   return result;
 }
 
@@ -286,13 +276,14 @@ function getDashboardData(includeArchive = false) {
  * 중복 검출을 위해 매칭되는 모든 행을 반환한다.
  */
 function findRowsById(sheet, id) {
-  const lastRow = sheet.getLastRow();
-  if (lastRow < 2) return [];
-  const ids = sheet.getRange(2, COL.ID, lastRow - 1, 1).getValues();
+  // [PERF] 비용은 데이터 양이 아니라 Sheets 왕복 횟수에 비례한다(호출당 약 200~500ms).
+  //   getLastRow + getRange 로 2회 부르던 것을 getDataRange 1회로 줄인다.
+  //   A열만 필요하지만 왕복 1회가 열 몇 개보다 훨씬 비싸다.
+  const values = sheet.getDataRange().getValues();
   const target = String(id);
   const rows = [];
-  for (let i = 0; i < ids.length; i++) {
-    if (String(ids[i][0]) === target) rows.push(i + 2);
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][COL.ID - 1]) === target) rows.push(i + 1);
   }
   return rows;
 }

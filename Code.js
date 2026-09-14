@@ -158,17 +158,27 @@ function generateUniqueUuid(sheet) {
  *         점유한 상태에서 호출해야 한다. B열 표시형식도 여기서 일괄 지정한다.
  * ==============================================================================
  */
-function appendRowsSafely(sheet, rows) {
+function appendRowsSafely(sheet, rows, ctx) {
   if (!sheet || !rows || rows.length === 0) return 0;
+
+  // [PERF] 비용은 데이터 양이 아니라 Sheets 왕복 횟수에 비례한다(호출당 약 200~500ms).
+  //   getLastColumn + getLastRow 로 왕복 2회를 쓰고 있었다.
+  //   호출부가 이미 시트를 읽었다면 그 결과(ctx)를 넘겨받아 왕복을 0회로 만든다.
+  var headerWidth = ctx && ctx.headerWidth;
+  var lastRow = ctx && ctx.lastRow;
+  if (headerWidth === undefined || lastRow === undefined) {
+    var values = sheet.getDataRange().getValues();   // 왕복 1회로 둘 다 얻는다
+    headerWidth = values.length > 0 ? values[0].length : 0;
+    lastRow = values.length;
+  }
 
   // [STEP3] 감사 컬럼 마이그레이션 전 시트에는 A~H만 기록한다.
   //         마이그레이션을 잊어도 헤더 없는 열에 값이 흘러들어가지 않도록 방어.
-  var headerWidth = sheet.getLastColumn();
   if (headerWidth > 0 && headerWidth < rows[0].length) {
     rows = rows.map(function (r) { return r.slice(0, headerWidth); });
   }
 
-  var startRow = sheet.getLastRow() + 1;
+  var startRow = lastRow + 1;
   sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
   // [PERF] 행마다 setNumberFormat을 2번 호출하던 것을 제거했다.
   //   표시형식은 ensureTxnColumnFormats()가 열 전체에 한 번 지정하므로 새 행이 자동으로 상속한다.
