@@ -183,6 +183,7 @@ function getDashboardData(includeArchive = false) {
   try { assertAuthorized(); } catch(e) { return { _error: e.message }; } 
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const spreadsheetId = ss.getId();
   const result = {};
 
   // [PERF] 조회 대상에서 '정기_수입지출_설정_및_휴일기준'을 제외했다.
@@ -206,21 +207,72 @@ function getDashboardData(includeArchive = false) {
     return s;
   }
 
+  // [PERF-batchGet] 시트 API가 SERIAL_NUMBER로 돌려준 날짜(타임존 없는 순수 일수)를
+  //   getValues()가 주는 Date와 동일한 절대시각으로 재구성한다.
+  //   toDateObject('yyyy-MM-dd')는 이미 '시트 시간대 자정'을 만드는 함수이므로 그대로 재사용한다.
+  //   (시간 성분은 이 프로젝트의 날짜 셀에서 쓰이지 않으므로 정수부만 취한다)
+  const serialDateCache = {};
+  function serialToDate(serial) {
+    let d = serialDateCache[serial];
+    if (d !== undefined) return d;
+    const days = Math.floor(serial) - 25569; // 1899-12-30 -> 1970-01-01 사이 일수
+    const utc = new Date(days * 86400 * 1000);
+    const ymd = utc.getUTCFullYear() + '-' +
+      String(utc.getUTCMonth() + 1).padStart(2, '0') + '-' +
+      String(utc.getUTCDate()).padStart(2, '0');
+    d = toDateObject(ymd);
+    serialDateCache[serial] = d;
+    return d;
+  }
+
+  // [STEP3] 날짜값이 들어갈 수 있는 컬럼명. batchGet 경로에서 Date 타입이 사라지고
+  //   순수 숫자(SERIAL_NUMBER)로 오기 때문에, instanceof Date 대신 헤더명으로 판별한다.
+  const DATE_HEADER_NAMES = ['날짜', '년월'];
+
   // [PERF] 실측 결과 비용은 데이터 양이 아니라 'Sheets 백엔드 왕복 횟수'에 비례한다.
-  //   2행짜리 시트도 0.5초가 걸렸다 (호출 1회당 약 450~550ms).
-  //   그래서 호출 수를 최소화한다.
-  //     - getSheets() 1회로 전체 시트를 받아 이름으로 매핑 (getSheetByName 반복 제거)
-  //     - 시트당 getDataRange().getValues() 단 1회
-  //       (이전에는 빈 시트 확인용 getLastRow/getLastColumn까지 불러 시트마다 3회였다.
-  //        values.length 로 판별하면 추가 호출이 필요 없다)
+  //   2행짜리 시트도 0.5초가 걸렸다 (호출 1회당 약 250~1100ms, 변동폭이 크다).
+  //   개별 SpreadsheetApp 호출을 시트마다 하면 6개 시트 = 최대 2.5초가 걸렸다.
+  //   Advanced Sheets API의 batchGet은 여러 range를 HTTP 요청 1번으로 묶는다.
+  //   valueRenderOption: UNFORMATTED_VALUE로 숫자에 천단위 콤마 등 서식이 섞이는 걸 막고,
+  //   dateTimeRenderOption: SERIAL_NUMBER로 날짜를 원시 일련번호로 받아 위 serialToDate로
+  //   getValues()와 동일한 Date로 재구성한다.
+  //   요청한 시트 중 하나라도 없으면 batchGet 전체가 실패하므로, 실패 시엔 기존
+  //   SpreadsheetApp 방식(시트별 개별 조회)으로 폴백한다.
+  const REG_TAB = SHEET_REGULAR;
+  const ALL_TABS = TARGET_TABS.concat([REG_TAB]);
+  let valuesByTab = null;
+  try {
+    const resp = Sheets.Spreadsheets.Values.batchGet(spreadsheetId, {
+      ranges: ALL_TABS.map(function (name) { return "'" + name + "'"; }),
+      valueRenderOption: 'UNFORMATTED_VALUE',
+      dateTimeRenderOption: 'SERIAL_NUMBER'
+    });
+    valuesByTab = {};
+    (resp.valueRanges || []).forEach(function (vr, i) {
+      valuesByTab[ALL_TABS[i]] = vr.values || [];
+    });
+  } catch (e) {
+    Logger.log('[getDashboardData] batchGet 실패(' + e.message + ') → 개별 조회로 폴백');
+  }
+
+  // [폴백 전용] batchGet이 실패했을 때만 채워지는 시트 맵. 성공 시엔 호출되지 않는다.
   const sheetByName = {};
-  ss.getSheets().forEach(function (sh) { sheetByName[sh.getName()] = sh; });
+  function ensureSheetMap() {
+    if (Object.keys(sheetByName).length === 0) {
+      ss.getSheets().forEach(function (sh) { sheetByName[sh.getName()] = sh; });
+    }
+  }
 
   TARGET_TABS.forEach(function (tabName) {
-    const sheet = sheetByName[tabName];
-    if (!sheet) { result[tabName] = []; return; }
-
-    const values = sheet.getDataRange().getValues();
+    let values;
+    if (valuesByTab) {
+      values = valuesByTab[tabName] || [];
+    } else {
+      ensureSheetMap();
+      const sheet = sheetByName[tabName];
+      if (!sheet) { result[tabName] = []; return; }
+      values = sheet.getDataRange().getValues();
+    }
     if (values.length < 1) { result[tabName] = []; return; }
     const headers = values[0];
     const data = [];
@@ -230,6 +282,10 @@ function getDashboardData(includeArchive = false) {
     // [PERF] 거래 시트는 A~H까지만 내려보낸다 (삭제여부는 필터용으로만 읽고 전송하지 않음)
     const isTxn = TXN_SHEETS.indexOf(tabName) !== -1;
     const colCount = isTxn ? Math.min(headers.length, COL.NOTE) : headers.length;
+
+    // [STEP3] 이 시트에서 날짜로 취급할 컬럼 인덱스 (헤더명 기준)
+    const dateColIdxs = [];
+    headers.forEach(function (h, idx) { if (DATE_HEADER_NAMES.indexOf(h) !== -1) dateColIdxs.push(idx); });
 
     for (let i = 1; i < values.length; i++) {
       const row = values[i];
@@ -243,7 +299,13 @@ function getDashboardData(includeArchive = false) {
         let val = row[j];
         // [STEP2-fix] 스프레드시트 시간대 기준으로 포맷.
         //             스크립트 시간대로 포맷하면 두 시간대가 다를 때 날짜가 하루 밀린다.
-        if (val instanceof Date) val = fmtDateCached(val);
+        if (val instanceof Date) {
+          val = fmtDateCached(val);
+        } else if (dateColIdxs.indexOf(j) !== -1 && typeof val === 'number') {
+          // batchGet 경로: 날짜 컬럼이 SERIAL_NUMBER(순수 숫자)로 온 경우만 변환.
+          //   사용자가 텍스트로 입력한 값(문자열)은 그대로 둔다(기존 동작과 동일).
+          val = fmtDateCached(serialToDate(val));
+        }
         if (val !== '' && val !== null) isEmptyRow = false;
         rowData[headers[j]] = val;
       }
@@ -259,13 +321,17 @@ function getDashboardData(includeArchive = false) {
   // [PERF] getLastRow + getRange = 왕복 2회였다. getDataRange 1회로 줄인다.
   //   정기 시트는 설정 시트라 행이 적어 전체를 읽어도 부담이 없다.
   result['_정기소분류'] = [];
-  const regSheet = sheetByName[SHEET_REGULAR];
-  if (regSheet) {
-    const regRows = regSheet.getDataRange().getValues();
-    for (let i = 1; i < regRows.length; i++) {
-      const sub = String(regRows[i][COL.SUB - 1] || '').trim();  // D열 = 소분류
-      if (sub) result['_정기소분류'].push(sub);
-    }
+  let regRows;
+  if (valuesByTab) {
+    regRows = valuesByTab[REG_TAB] || [];
+  } else {
+    ensureSheetMap();
+    const regSheet = sheetByName[REG_TAB];
+    regRows = regSheet ? regSheet.getDataRange().getValues() : [];
+  }
+  for (let i = 1; i < regRows.length; i++) {
+    const sub = String(regRows[i][COL.SUB - 1] || '').trim();  // D열 = 소분류
+    if (sub) result['_정기소분류'].push(sub);
   }
 
   return result;
