@@ -2,6 +2,7 @@
   "name": "binine-onine-budget",
   "version": "1.0.0",
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "login": "clasp login",
     "whoami": "clasp show-authorized-user",
     "status": "clasp show-file-status",

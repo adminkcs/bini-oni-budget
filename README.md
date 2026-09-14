@@ -18,9 +18,62 @@ Google 스프레드시트에 연결된(컨테이너 바인딩) Apps Script 웹�
 > `Dashboard.js`가 `include('Common')`, `createTemplateFromFile('Mobile')`로 참조하므로
 > `Common.html` / `Mobile.html`의 대소문자를 바꾸면 런타임 오류가 난다.
 
+## 다른 PC에서 작업하기 (Windows 기준)
+
+`.clasp.json`(Script ID)과 `.clasp-prod`(운영 배포 ID = 웹앱 URL)는 **저장소에 커밋하지 않는다.**
+저장소가 나중에 공개로 바뀌어도 노출되지 않게 하기 위함이다.
+그래서 clone 직후에는 clasp 명령이 동작하지 않으며, `npm run setup`으로 재생성한다.
+
+### 사전 준비 (해당 PC에서 한 번만)
+
+| 프로그램 | 확인 | 비고 |
+|---|---|---|
+| [Node.js LTS](https://nodejs.org) | `node -v` `npm -v` | 설치 후 터미널을 새로 열어야 PATH가 잡힌다 |
+| [Git for Windows](https://git-scm.com/download/win) | `git --version` | Git Bash 또는 PowerShell 모두 가능 |
+
+### 설정 (PowerShell 또는 Git Bash)
+
+```powershell
+git clone https://github.com/adminkcs/bini-oni-budget.git
+cd bini-oni-budget
+
+npm install                      # node_modules 복원 (clasp 포함)
+npx clasp login                  # 브라우저 승인. 이 PC에서 한 번만
+npm run setup -- <Script ID>     # .clasp.json + .clasp-prod 생성
+```
+
+**Script ID 확인:** 가계부 시트 → 확장 프로그램 → Apps Script → ⚙️ 프로젝트 설정 → 스크립트 ID
+
+`npm run setup`은 로그인 상태를 확인하고 배포 목록에서 **버전이 매겨진 최신 배포**를 운영으로
+판단해 `.clasp-prod`에 기록한다. 특정할 수 없으면 후보를 나열하고 직접 고르게 한다.
+
+### 커밋 신원 (이 저장소에만)
+
+```powershell
+git config --local user.email "본인이메일"
+git config --local user.name  "본인이름"
+```
+
+> `--global`은 쓰지 않는다. 같은 PC의 다른 프로젝트 커밋 신원까지 바뀐다.
+
+### 확인
+
+```powershell
+npm test                 # 174건. clasp·네트워크 없이 동작한다
+npm run pull             # 서버 -> 로컬
+git status               # 변경이 없으면 서버와 로컬이 동일
+```
+
+### Windows 관련 참고
+
+- npm 스크립트는 `cmd`로 실행된다. `&&` 연결과 `npm run xxx -- 인자` 모두 정상 동작한다
+- `scripts/*.mjs`는 `npx.cmd` 분기를 넣어 두어 Windows에서도 그대로 동작한다
+- 줄바꿈(CRLF)은 건드리지 않았다. 문제가 생기면 `git config --local core.autocrlf false`
+
 ## clasp 사용법
 
 ```bash
+npm run setup -- <ID>  # 새 PC 최초 설정 (.clasp.json / .clasp-prod 생성)
 npm run whoami       # 로그인 계정 확인
 npm run status       # push 대상 파일 미리보기 (전송 안 함)
 npm run pull         # 서버 -> 로컬
