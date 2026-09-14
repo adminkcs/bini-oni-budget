@@ -348,7 +348,8 @@ npm run redeploy -- -V 11 -d "롤백"
 | 12 | STEP2 + STEP3A |
 | 13 | STEP3B + 성능개선 |
 | 14 | 퀵등록/소분류 표기/구분 토글 개선 |
-| 15 | 홈 화면 아이콘 적용 (현재 운영) |
+| 15 | 홈 화면 아이콘 적용 — **theme-color 메타태그로 doGet 실패. 사용 금지** |
+| 16 | v15 수정 (현재 운영) |
 
 ## 성능 설계 메모
 
@@ -434,8 +435,12 @@ npm run redeploy -- -V 11 -d "롤백"
 
 ```js
 .setFaviconUrl(ICON_URL)
-.addMetaTag('theme-color', '#EFF5FC')
 ```
+
+> **`addMetaTag`에 아무 이름이나 넣으면 안 된다.** Apps Script가 허용한 이름만 받는다.
+> `theme-color`를 추가했다가 `doGet` 전체가
+> `지정한 메타태그는 이 컨텍스트에서 허용되지 않습니다`로 실패해 **운영 URL이 오류 화면이 됐다**(v15).
+> `viewport` 외에는 추가하지 않는다. 주소창 색상은 포기한다.
 
 **Android(갤럭시)** 는 '홈 화면에 추가' 시 파비콘을 아이콘으로 쓴다.
 `HtmlService`에는 `<link>` 태그를 넣을 방법이 없어(우리 HTML은 샌드박스 iframe 안이라

@@ -125,8 +125,10 @@ function doGet(e) {
     //   이미지는 이 저장소의 공개 URL에서 제공한다. 비공개 저장소면 익명 접근이 막혀
     //   404가 되므로 아이콘이 뜨지 않는다.
     .setFaviconUrl(ICON_URL)
-    // 주소창 색상을 아이콘 배경과 맞춘다
-    .addMetaTag('theme-color', '#EFF5FC')
+    // [주의] addMetaTag는 Apps Script가 허용한 이름만 받는다.
+    //   'theme-color'를 넣었다가 doGet 전체가
+    //   "지정한 메타태그는 이 컨텍스트에서 허용되지 않습니다"로 실패했다.
+    //   viewport 외에는 추가하지 말 것. 주소창 색상은 포기한다.
     // [STEP3] ALLOWALL -> DEFAULT. 외부 사이트 iframe 삽입 허용은 클릭재킹 노출이며
     //         이 앱은 독립 URL로만 사용한다. (시트 내 임베드가 필요해지면 되돌릴 것)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT)
