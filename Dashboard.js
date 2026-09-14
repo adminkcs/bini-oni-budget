@@ -209,17 +209,25 @@ function getDashboardData(includeArchive = false) {
     return s;
   }
 
+  // [PERF] 실측 결과 비용은 데이터 양이 아니라 'Sheets 백엔드 왕복 횟수'에 비례한다.
+  //   2행짜리 시트도 0.5초가 걸렸다 (호출 1회당 약 450~550ms).
+  //   그래서 호출 수를 최소화한다.
+  //     - getSheets() 1회로 전체 시트를 받아 이름으로 매핑 (getSheetByName 반복 제거)
+  //     - 시트당 getDataRange().getValues() 단 1회
+  //       (이전에는 빈 시트 확인용 getLastRow/getLastColumn까지 불러 시트마다 3회였다.
+  //        values.length 로 판별하면 추가 호출이 필요 없다)
+  const sheetByName = {};
+  ss.getSheets().forEach(function (sh) { sheetByName[sh.getName()] = sh; });
+
   const timing = []; // [계측] 시트별 소요 시간
 
   TARGET_TABS.forEach(function (tabName) {
     const ts = Date.now();
-    const sheet = ss.getSheetByName(tabName);
+    const sheet = sheetByName[tabName];
     if (!sheet) { result[tabName] = []; return; }
-    const lastRow = sheet.getLastRow();
-    const lastCol = sheet.getLastColumn();
-    if (lastRow < 1 || lastCol < 1) { result[tabName] = []; return; }
 
     const values = sheet.getDataRange().getValues();
+    if (values.length < 1) { result[tabName] = []; return; }
     const headers = values[0];
     const data = [];
 
@@ -249,22 +257,27 @@ function getDashboardData(includeArchive = false) {
       if (!isEmptyRow) data.push(rowData);
     }
     result[tabName] = data;
-    timing.push(tabName + ' ' + data.length + '행 ' + (Date.now() - ts) + 'ms(' + lastRow + 'x' + lastCol + ')');
+    timing.push(tabName + ' ' + data.length + '행 ' + (Date.now() - ts) + 'ms');
   });
-  Logger.log('[계측] ' + timing.join(' | '));
 
   // [퀵등록] '자주 쓰는 항목'은 소분류 단위로 집계하며, 정기 등록분은 제외한다.
   //   그 판별을 위해 정기 시트의 '소분류'(D열) 한 컬럼만 가볍게 읽어 내려보낸다.
   //   성능을 위해 이 시트는 조회 대상(TARGET_TABS)에서 제외돼 있으므로 전체를 읽지 않는다.
+  // [PERF] getLastRow + getRange = 왕복 2회였다. getDataRange 1회로 줄인다.
+  //   정기 시트는 설정 시트라 행이 적어 전체를 읽어도 부담이 없다.
   result['_정기소분류'] = [];
-  const regSheet = ss.getSheetByName(SHEET_REGULAR);
-  if (regSheet && regSheet.getLastRow() > 1) {
-    result['_정기소분류'] = regSheet.getRange(2, 4, regSheet.getLastRow() - 1, 1)
-      .getValues()
-      .map(function (r) { return String(r[0] || '').trim(); })
-      .filter(function (v) { return v !== ''; });
+  const regSheet = sheetByName[SHEET_REGULAR];
+  if (regSheet) {
+    const regTs = Date.now();
+    const regRows = regSheet.getDataRange().getValues();
+    for (let i = 1; i < regRows.length; i++) {
+      const sub = String(regRows[i][COL.SUB - 1] || '').trim();  // D열 = 소분류
+      if (sub) result['_정기소분류'].push(sub);
+    }
+    timing.push('정기소분류 ' + result['_정기소분류'].length + '개 ' + (Date.now() - regTs) + 'ms');
   }
 
+  Logger.log('[계측] ' + timing.join(' | '));
   return result;
 }
 
