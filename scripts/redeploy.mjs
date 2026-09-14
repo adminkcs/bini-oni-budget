@@ -19,10 +19,17 @@ if (!id) {
 
 const args = process.argv.slice(2);
 console.log(`운영 배포 갱신: ${id.slice(0, 16)}...  ${args.join(' ')}`);
-// shell:true 를 쓰면 공백이 든 인자(-d "설명 문구")가 쉘에서 다시 쪼개져
-// clasp이 "too many arguments" 로 실패한다. 셸을 거치지 않고 인자를 그대로 전달한다.
-const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-const r = spawnSync(npx, ['clasp', 'update-deployment', id, ...args], {
-  stdio: 'inherit'
-});
+
+const isWin = process.platform === 'win32';
+// Windows에서 .cmd는 shell:true 없이 spawn하면 EINVAL이 난다(Node 18+ 보안 변경).
+// shell:true를 쓰면 공백이 든 인자(-d "설명 문구")가 다시 쪼개지므로, 각 인자를
+// cmd.exe 규칙에 맞게 직접 따옴표로 감싸 전달한다.
+const winQuote = (s) => `"${String(s).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
+const npx = isWin ? 'npx.cmd' : 'npx';
+const claspArgs = ['clasp', 'update-deployment', id, ...args];
+const r = spawnSync(
+  npx,
+  isWin ? claspArgs.map(winQuote) : claspArgs,
+  { stdio: 'inherit', shell: isWin }
+);
 process.exit(r.status ?? 1);

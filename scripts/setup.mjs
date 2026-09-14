@@ -22,7 +22,7 @@ function fail(msg) {
 }
 
 function runClasp(args) {
-  const r = spawnSync(npx, ['clasp', ...args], { encoding: 'utf8' });
+  const r = spawnSync(npx, ['clasp', ...args], { encoding: 'utf8', shell: process.platform === 'win32' });
   return {
     ok: r.status === 0,
     out: ((r.stdout || '') + (r.stderr || '')).trim()
