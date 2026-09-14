@@ -168,10 +168,8 @@ function getBootstrapJson() {
     var t1 = Date.now();
     var json = toSafeJson(data);
     var t2 = Date.now();
-    // console.log는 Cloud Logging으로 직행해 웹앱 실행에서도 실행 기록에 남는다.
-    // Logger.log는 구형 로거라 웹앱 컨텍스트에서 누락되는 경우가 있다.
-    console.log('[계측] 시트읽기 ' + (t1 - t0) + 'ms | 직렬화 ' + (t2 - t1) +
-                'ms | JSON ' + Math.round(json.length / 1024) + 'KB');
+    Logger.log('[계측] 시트읽기 ' + (t1 - t0) + 'ms | 직렬화 ' + (t2 - t1) +
+               'ms | JSON ' + Math.round(json.length / 1024) + 'KB');
     return json;
   } catch (e) {
     Logger.log('[부트스트랩 실패] ' + (e && e.message ? e.message : e));
@@ -253,7 +251,7 @@ function getDashboardData(includeArchive = false) {
     result[tabName] = data;
     timing.push(tabName + ' ' + data.length + '행 ' + (Date.now() - ts) + 'ms(' + lastRow + 'x' + lastCol + ')');
   });
-  console.log('[계측] ' + timing.join(' | '));
+  Logger.log('[계측] ' + timing.join(' | '));
 
   // [퀵등록] '자주 쓰는 항목'은 소분류 단위로 집계하며, 정기 등록분은 제외한다.
   //   그 판별을 위해 정기 시트의 '소분류'(D열) 한 컬럼만 가볍게 읽어 내려보낸다.
