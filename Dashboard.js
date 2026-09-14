@@ -96,6 +96,13 @@ function assertAuthorized() {
   }
 }
 
+/**
+ * 홈 화면 아이콘(파비콘) URL.
+ * 저장소 assets/ 의 공개 파일을 가리킨다. 이미지를 교체하면 이 URL은 그대로 두고
+ * assets/icon-192.png 만 바꿔 커밋하면 된다(캐시 때문에 반영에 시간이 걸릴 수 있음).
+ */
+var ICON_URL = 'https://raw.githubusercontent.com/adminkcs/bini-oni-budget/main/assets/icon-192.png';
+
 function doGet(e) {
   try {
     assertAuthorized();
@@ -112,6 +119,14 @@ function doGet(e) {
   return HtmlService.createTemplateFromFile(templateName).evaluate()
     // [STEP3] maximum-scale / user-scalable=no 제거 - 확대 차단은 접근성 위반
     .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    // [아이콘] Android(갤럭시)는 '홈 화면에 추가' 시 파비콘을 아이콘으로 쓴다.
+    //   HtmlService에는 <link> 태그를 넣을 방법이 없고(우리 HTML은 샌드박스 iframe 안이라
+    //   최상위 문서의 head에 닿지 않는다) setFaviconUrl()이 유일한 경로다.
+    //   이미지는 이 저장소의 공개 URL에서 제공한다. 비공개 저장소면 익명 접근이 막혀
+    //   404가 되므로 아이콘이 뜨지 않는다.
+    .setFaviconUrl(ICON_URL)
+    // 주소창 색상을 아이콘 배경과 맞춘다
+    .addMetaTag('theme-color', '#EFF5FC')
     // [STEP3] ALLOWALL -> DEFAULT. 외부 사이트 iframe 삽입 허용은 클릭재킹 노출이며
     //         이 앱은 독립 URL로만 사용한다. (시트 내 임베드가 필요해지면 되돌릴 것)
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.DEFAULT)
