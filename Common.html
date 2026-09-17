@@ -469,6 +469,25 @@
     return { expense, income, net: income - expense };
   }
 
+  /** [PERF] 이번 달/전월 합계를 한 번의 순회로 함께 계산한다 (monthTotals 2회 호출 시 전체 배열을 2번 도는 것을 방지). */
+  function monthTotalsPair(ym, prevYm) {
+    const cur = { expense: 0, income: 0 };
+    const prev = { expense: 0, income: 0 };
+    allTransactions.forEach(t => {
+      if (!t.날짜) return;
+      const m = t.날짜.substring(0, 7);
+      let bucket;
+      if (m === ym) bucket = cur;
+      else if (m === prevYm) bucket = prev;
+      else return;
+      if (t.구분 === '지출') bucket.expense += Math.abs(t.금액);
+      else bucket.income += Math.abs(t.금액);
+    });
+    cur.net = cur.income - cur.expense;
+    prev.net = prev.income - prev.expense;
+    return { cur, prev };
+  }
+
   /**
    * 전월 대비 증감 표시 HTML.
    * invert=true 이면 증가가 나쁜 지표(지출) — 증가를 빨강으로 표시한다.
@@ -513,9 +532,13 @@
     return sums;
   }
 
+  let searchInputTimer = null;
   function handleSearchInput(el) {
     searchKeyword = el.value || '';
-    if (typeof renderView === 'function') renderView();
+    clearTimeout(searchInputTimer);
+    searchInputTimer = setTimeout(function () {
+      if (typeof renderView === 'function') renderView();
+    }, 300);
   }
 
   function initDateRange() {

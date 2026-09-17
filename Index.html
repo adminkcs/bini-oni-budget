@@ -255,8 +255,7 @@
 
       // [STEP3B] 전월 대비. 필터와 무관하게 '해당 월 전체' 기준으로 비교한다.
       const ym = currentYearMonth();
-      const cur = monthTotals(ym);
-      const prev = monthTotals(prevYearMonth(ym));
+      const { cur, prev } = monthTotalsPair(ym, prevYearMonth(ym));
       document.getElementById('sc-expense-delta').innerHTML = deltaHtml(cur.expense, prev.expense, true);
       document.getElementById('sc-income-delta').innerHTML = deltaHtml(cur.income, prev.income, false);
       document.getElementById('sc-net-delta').innerHTML = deltaHtml(cur.net, prev.net, false);
