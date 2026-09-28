@@ -316,8 +316,10 @@
     catRows.forEach(r => {
       const m = r['대분류'], s = r['소분류'], desc = r['설명'];
       if (!m) return;
+      // [신규] 노출 여부가 'Y'인 소분류만 신규 등록 폼에 노출한다 (기존 값 보존은 ensureSubCatOption이 처리)
+      const visible = String(r['노출 여부'] || '').trim().toUpperCase() === 'Y';
       if (!categoryMap[m]) categoryMap[m] = [];
-      if (s && !categoryMap[m].includes(s)) categoryMap[m].push(s);
+      if (s && visible && !categoryMap[m].includes(s)) categoryMap[m].push(s);
       if (m !== '수입' && !expenseMainCats.includes(m)) expenseMainCats.push(m);
       if (s) {
         // [STEP2] 같은 소분류가 서로 다른 대분류에 있으면 뒤에서 덮어써져 잘못된 대분류로
