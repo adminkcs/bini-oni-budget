@@ -122,6 +122,7 @@
   let subCatToMainCat = {};
   let regType = '지출';
   let quickAddItems = [];
+  let quickAddChipsList = []; // [신규] 고정 항목까지 합쳐 실제로 화면에 그려지는 칩 목록
   let isInitialLoad = true;
   let bootstrapConsumed = false;   // [PERF] doGet이 심어 보낸 초기 데이터 사용 여부
   let toastTimer = null;
@@ -149,7 +150,8 @@
 
   // [퀵등록] 자주 쓰는 항목 집계 기준
   const QUICK_ADD_DAYS = 14;  // 최근 2주
-  const QUICK_ADD_MAX = 3;    // 최대 3개
+  const QUICK_ADD_MAX = 5;    // 최대 5개
+  const PINNED_QUICK_ADD = ['회사 식대']; // [신규] 사용 빈도와 무관하게 항상 노출할 고정 항목
 
   // 소분류 선택지에 붙는 설명의 최대 길이. 넘으면 …로 줄인다.
   const SUBCAT_DESC_MAX = 16;
@@ -722,6 +724,8 @@
     subSelect.innerHTML = '';
     const subs = [];
     cats.forEach(m => (categoryMap[m] || []).forEach(s => { if (!subs.includes(s)) subs.push(s); }));
+    // [버그수정] 대분류별로 묶여 우선순위가 뒤섞이지 않도록, 전체 목록을 우선순위 기준으로 다시 정렬한다
+    subs.sort((a, b) => (subCatPriorityMap[a] ?? Number.MAX_SAFE_INTEGER) - (subCatPriorityMap[b] ?? Number.MAX_SAFE_INTEGER));
     subs.forEach(s => subSelect.appendChild(new Option(subCatOptionLabel(s), s))); // 표시는 설명 포함, 값은 소분류명
     onRegSubCatChange(); renderPaymentOptions(); renderQuickAddChips();
   }
@@ -859,24 +863,44 @@
       .map(v => v.latest);
   }
 
+  /**
+   * [신규] 고정 항목(PINNED_QUICK_ADD)을 최근 사용 빈도 목록 앞에 합쳐 실제 화면에 노출할
+   * 칩 목록을 만든다. 고정 항목이 이미 빈도 목록에 있으면 중복 없이 앞으로 끌어온다.
+   * 총 개수는 QUICK_ADD_MAX를 넘지 않는다.
+   */
+  function buildQuickAddChipsList() {
+    const pinned = PINNED_QUICK_ADD.map(label => {
+      const found = quickAddItems.find(v => v.소분류 === label);
+      if (found) return found;
+      // 최근 14일 내 사용 이력이 없어도 최근 거래에서 결제수단 등을 가져와 채운다
+      const latest = allTransactions
+        .filter(t => t.구분 === '지출' && String(t.소분류 || '').trim() === label)
+        .sort((a, b) => String(b.날짜 || '').localeCompare(String(a.날짜 || '')))[0];
+      return latest || { 소분류: label, 결제수단: '' };
+    });
+    const rest = quickAddItems.filter(v => !PINNED_QUICK_ADD.includes(v.소분류));
+    return pinned.concat(rest).slice(0, QUICK_ADD_MAX);
+  }
+
   function renderQuickAddChips() {
     const wrap = document.getElementById('quick-add-wrap');
     if (regType !== '지출') { wrap.style.display = 'none'; return; }
     wrap.style.display = 'flex';
 
     const box = document.getElementById('quick-add-chips');
+    quickAddChipsList = buildQuickAddChipsList();
     // 후보가 없을 때 영역을 통째로 숨기면 '고장인지 데이터가 없는 건지' 구분이 안 되므로 사유를 표시한다
-    if (quickAddItems.length === 0) {
+    if (quickAddChipsList.length === 0) {
       box.innerHTML = `<span style="font-size:12px; color:var(--text-dim);">최근 ${QUICK_ADD_DAYS}일 내 반복 사용한 소분류가 없습니다.</span>`;
       return;
     }
-    box.innerHTML = quickAddItems.map((item, idx) =>
+    box.innerHTML = quickAddChipsList.map((item, idx) =>
       `<button type="button" class="quick-chip" onclick="applyQuickAdd(${idx})">${escapeHtml(item.소분류)}</button>`
     ).join('');
   }
 
   function applyQuickAdd(idx) {
-    const item = quickAddItems[idx];
+    const item = quickAddChipsList[idx];
     if (!item) return;
     ensureSubCatOption(item.소분류);
     document.getElementById('reg-sub-cat').value = item.소분류;

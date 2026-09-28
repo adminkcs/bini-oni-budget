@@ -77,16 +77,18 @@ console.log('\n=== 자동입력 행은 비고로도 제외 (이중 방어) ===')
   r.check('일반 건은 남음', names.includes('편의점'), true);
 }
 
-console.log('\n=== 상위 3개 · 사용 횟수 내림차순 ===');
+console.log('\n=== 상위 5개 · 사용 횟수 내림차순 ===');
 {
   const rows = [];
-  ['A','A','A','A', 'B','B','B', 'C','C', 'D'].forEach((n, i) => rows.push(tx(daysAgo(i % 10), n)));
+  ['A','A','A','A','A', 'B','B','B','B', 'C','C','C', 'D','D', 'E', 'F'].forEach((n, i) => rows.push(tx(daysAgo(i % 10), n)));
   const { items } = build(rows);
-  r.check('최대 3개', items.length, 3);
+  r.check('최대 5개', items.length, 5);
   r.check('1위 A', items[0].소분류, 'A');
   r.check('2위 B', items[1].소분류, 'B');
   r.check('3위 C', items[2].소분류, 'C');
-  r.check('4위 D는 제외', items.map(i => i.소분류).includes('D'), false);
+  r.check('4위 D', items[3].소분류, 'D');
+  r.check('5위 E', items[4].소분류, 'E');
+  r.check('6위 F는 제외', items.map(i => i.소분류).includes('F'), false);
 }
 
 console.log('\n=== 동률이면 최근 사용 우선 ===');

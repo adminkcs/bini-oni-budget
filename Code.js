@@ -19,6 +19,7 @@ var NOTE_PREFIX_EXPENSE = "정기지출 자동입력";
 var NOTE_PREFIX_INCOME = "정기수입 자동입력";
 var WEIGHT_HEADER = "정렬가중치";
 var TODAY_BG = "#fff2cc";
+var CATEGORY_INVALID_BG = "#f4cccc"; // [신규] 분류_설정에 없는 대분류/소분류 표시색
 
 /**
  * ★ [STEP3] 거래 시트 컬럼 정의 (가계부_내역 / 수입 공통)
@@ -378,6 +379,15 @@ function getRegularSortWeight(targetSetting, today) {
  * ==============================================================================
  */
 function buildRegularDoneKeys(sheet, todayStr) {
+  return buildRegularDoneKeysInRange(sheet, todayStr, todayStr);
+}
+
+/**
+ * [신규] buildRegularDoneKeys의 범위 버전. 월간 일괄 등록(insertRegularExpensesForMonth)이
+ * 하루치가 아니라 한 달치 멱등성 키를 한 번의 시트 읽기로 모아야 해서 분리했다.
+ * fromStr === toStr === todayStr로 호출하면 기존 buildRegularDoneKeys와 동일하게 동작한다.
+ */
+function buildRegularDoneKeysInRange(sheet, fromStr, toStr) {
   var keys = {};
   if (!sheet) return keys;
   var lastRow = sheet.getLastRow();
@@ -388,7 +398,7 @@ function buildRegularDoneKeys(sheet, todayStr) {
     var note = String(values[i][7] || "");
     if (note.indexOf(NOTE_PREFIX_EXPENSE) !== 0 && note.indexOf(NOTE_PREFIX_INCOME) !== 0) continue;
     var dStr = fmtDate(values[i][1]);
-    if (dStr !== todayStr) continue;
+    if (dStr < fromStr || dStr > toStr) continue;
 
     var hashPos = note.indexOf("#");
     if (hashPos !== -1) {
@@ -397,6 +407,28 @@ function buildRegularDoneKeys(sheet, todayStr) {
     keys[dStr + "|~" + String(values[i][4] || "").trim()] = true;
   }
   return keys;
+}
+
+/**
+ * 임의의 날짜(dateStr)에 대해 matchesRegularSchedule이 필요로 하는 정보를 만든다.
+ * getTodayInfo()와 같은 구조이지만 '오늘'이 아니라 지정한 날짜 기준이다.
+ */
+function buildDayInfo(dateStr, lastDayOfMonth) {
+  var tz = getSheetTz();
+  var parts = dateStr.split("-");
+  var year = Number(parts[0]), month = Number(parts[1]), day = Number(parts[2]);
+  var dateObj = toDateObject(dateStr);
+  var fullDayNames = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
+  var dowIndex = parseInt(Utilities.formatDate(dateObj, tz, "u"), 10) % 7;
+  return {
+    year: year,
+    month: month,
+    day: day,
+    dateStr: dateStr,
+    dateObj: dateObj,
+    fullDay: fullDayNames[dowIndex],
+    lastDayOfMonth: lastDayOfMonth
+  };
 }
 
 /**
@@ -516,6 +548,133 @@ function insertRegularExpenses() {
     // [STEP3] 트리거가 조용히 실패하지 않도록 로그 시트 기록 + 관리자 메일 알림
     logRun("insertRegularExpenses", "실패", 0, err && err.message ? err.message : String(err));
     notifyFailure("insertRegularExpenses", err);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * ==============================================================================
+ * ★ [신규] 매월 1일, 이번 달 전체 분량의 정기 항목을 한 번에 등록한다.
+ *   - 기존 insertRegularExpenses(매일 실행)는 그대로 둔다. 이 함수는 같은 로직을
+ *     날짜별로 반복 적용할 뿐이라, 매일 트리거가 이후에 해당 날짜를 다시 실행해도
+ *     buildRegularDoneKeysInRange가 이미 들어간 항목을 찾아내 건너뛴다.
+ *   - 멱등성 키(날짜|ID, 날짜|~이름)는 insertRegularExpenses와 완전히 동일한 규칙을
+ *     쓰므로 두 함수가 같은 항목을 이중으로 넣을 수 없다. 어느 쪽이 먼저 실행되든
+ *     나중 실행은 시트에 이미 쓰인 행을 보고 건너뛴다.
+ *   - LockService 락도 동일하게 사용해 매일 트리거와 동시에 돌아도 서로 덮어쓰지 않는다.
+ * ==============================================================================
+ */
+function insertRegularExpensesForMonth() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log("[정기입력-월간] 다른 작업이 실행 중이어서 중단합니다.");
+    return;
+  }
+
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var regularSheet = ss.getSheetByName(SHEET_REGULAR);
+    var categorySheet = ss.getSheetByName(SHEET_CATEGORY);
+    var logSheet = ss.getSheetByName(SHEET_LOG);
+    var incomeSheet = ss.getSheetByName(SHEET_INCOME);
+
+    if (!regularSheet || !categorySheet || !logSheet || !incomeSheet) {
+      Logger.log("[오류] 필수 시트를 찾을 수 없어 스크립트를 종료합니다.");
+      return;
+    }
+
+    var today = getTodayInfo();
+    var fromStr = today.year + "-" + String(today.month).padStart(2, "0") + "-01";
+    var toStr = today.year + "-" + String(today.month).padStart(2, "0") + "-" + String(today.lastDayOfMonth).padStart(2, "0");
+
+    // 소분류 -> 대분류 매핑 (먼저 정의된 것을 유지해 뒤에서 덮어쓰지 않음)
+    var catData = categorySheet.getDataRange().getValues();
+    var catMap = {};
+    for (var i = 1; i < catData.length; i++) {
+      var mc = catData[i][0], sc = catData[i][1];
+      if (sc && !catMap[sc]) catMap[sc] = mc;
+    }
+
+    // [PERF] 시트 왕복은 이번 달 범위 전체를 한 번만 읽는다 (날짜마다 다시 읽지 않음)
+    var doneExpense = buildRegularDoneKeysInRange(logSheet, fromStr, toStr);
+    var doneIncome = buildRegularDoneKeysInRange(incomeSheet, fromStr, toStr);
+
+    var regData = regularSheet.getDataRange().getValues();
+    var expRows = [], incRows = [];
+    var skippedDup = 0, skippedAmt = 0;
+
+    for (var day = 1; day <= today.lastDayOfMonth; day++) {
+      var dateStr = today.year + "-" + String(today.month).padStart(2, "0") + "-" + String(day).padStart(2, "0");
+      var dayInfo = buildDayInfo(dateStr, today.lastDayOfMonth);
+
+      for (var r = 1; r < regData.length; r++) {
+        var regId = String(regData[r][0] || "").trim();
+        var itemName = regData[r][1];
+        var type = regData[r][2];
+        var subCategory = regData[r][3];
+        var targetSetting = regData[r][4];
+        var amount = regData[r][5];
+        var payment = regData[r][6];
+
+        if (!matchesRegularSchedule(targetSetting, dayInfo)) continue;
+
+        var isIncome = (type === '수입');
+        var finalAmount = normalizeAmount(isIncome ? '수입' : '지출', amount);
+        if (isNaN(finalAmount)) {
+          skippedAmt++;
+          continue;
+        }
+
+        // 멱등성 검사 (insertRegularExpenses와 동일한 키 규칙)
+        var keys = isIncome ? doneIncome : doneExpense;
+        var idKey = dateStr + "|" + regId;
+        var nameKey = dateStr + "|~" + String(itemName || "").trim();
+        if ((regId && keys[idKey]) || keys[nameKey]) {
+          skippedDup++;
+          continue;
+        }
+
+        var prefix = isIncome ? NOTE_PREFIX_INCOME : NOTE_PREFIX_EXPENSE;
+        var noteText = regId ? (prefix + "#" + regId) : prefix;
+        var mainCat = catMap[subCategory] ? catMap[subCategory] : type;
+        var subCat = subCategory ? subCategory : "기타";
+        var targetSheet = isIncome ? incomeSheet : logSheet;
+
+        var newRow = buildTxnRow({
+          id: generateUniqueUuid(targetSheet),
+          date: dayInfo.dateObj,
+          main: mainCat,
+          sub: subCat,
+          content: itemName,
+          amount: finalAmount,
+          payment: payment,
+          note: noteText,
+          actor: SYSTEM_ACTOR
+        });
+        if (isIncome) incRows.push(newRow); else expRows.push(newRow);
+
+        // 같은 실행 안에서의 중복도 차단 (다른 날짜의 동일 항목과는 키가 다르므로 섞이지 않음)
+        if (regId) keys[idKey] = true;
+        keys[nameKey] = true;
+      }
+    }
+
+    var added = appendRowsSafely(logSheet, expRows) + appendRowsSafely(incomeSheet, incRows);
+    if (expRows.length > 0) sortLogSheetByDate();
+
+    SpreadsheetApp.flush();
+    sortRegularSheet(regularSheet);
+
+    var summary = "이번 달(" + fromStr + "~" + toStr + ") 일괄 추가 " + added + "건 (지출 " + expRows.length +
+                  " / 수입 " + incRows.length + "), 중복 건너뜀 " + skippedDup +
+                  "건, 금액오류 건너뜀 " + skippedAmt + "건";
+    Logger.log("[정기입력-월간] " + summary);
+    logRun("insertRegularExpensesForMonth", "성공", added, summary);
+
+  } catch (err) {
+    logRun("insertRegularExpensesForMonth", "실패", 0, err && err.message ? err.message : String(err));
+    notifyFailure("insertRegularExpensesForMonth", err);
   } finally {
     lock.releaseLock();
   }
@@ -744,6 +903,7 @@ function onOpen() {
     .addItem('정기 항목 수동 실행', 'insertRegularExpenses')
     .addItem('중복 일련번호 검사', 'checkAndFixDuplicateUUIDs')
     .addItem('분류 설정 점검', 'validateCategorySheet')
+    .addItem('분류 유효성 표시 적용(색상)', 'applyCategoryValidityHighlight') // [신규]
     .addItem('예산 시트 만들기', 'ensureBudgetSheet')           // [STEP3B]
     .addItem('예산 지난달 값 수동 복사', 'copyBudgetToNewMonth') // [STEP3B]
     .addItem('스크립트 속성 점검', 'setupScriptProperties')      // 민감값을 코드에서 뺀 뒤 상태 확인용
@@ -871,6 +1031,93 @@ function validateCategorySheet() {
   }
   Logger.log("[점검] " + msg);
   if (ui) ui.alert("분류 설정 점검", msg, ui.ButtonSet.OK);
+}
+
+/**
+ * ==============================================================================
+ * ★ [신규] 대분류/소분류 유효성 표시 (조건부서식)
+ * [배경] 가계부 초기라 분류_설정의 대분류/소분류가 자주 바뀐다. 이미 기록된
+ *   가계부_내역/수입 행의 대분류·소분류가 분류_설정에서 지워지거나 이름이
+ *   바뀌면 화면(대시보드 집계 등)에서 조용히 '기타'류로 묶여버려 알아채기 어렵다.
+ * [방식] 셀에 색을 직접 칠하는 대신 조건부서식 규칙을 등록한다. 정기 항목
+ *   오늘자 강조(applyTodayHighlightRule)와 같은 이유: 직접 칠하면 분류_설정이
+ *   바뀔 때마다 이 메뉴를 다시 실행해야 하지만, 조건부서식은 시트를 열어둔
+ *   채로도 분류_설정 변경분을 즉시 반영한다. 그래서 트리거에는 넣지 않고
+ *   [가계부 도구] 메뉴에서 최초 1회(또는 시트 구조를 바꿨을 때) 실행하면 된다.
+ * [체크 범위] 대분류(C열)만이 아니라 대분류+소분류 조합(트리 구조)까지 검증한다.
+ *   - C열: 분류_설정의 대분류 목록에 아예 없으면 표시
+ *   - D열: 소분류명은 어딘가에 존재해도, "이 행의 대분류 밑에 이 소분류"라는
+ *          조합이 분류_설정에 없으면 표시 (대분류가 바뀌어 붕 뜬 소분류 탐지)
+ * ==============================================================================
+ */
+function applyCategoryValidityHighlight() {
+  var ui = null;
+  try { ui = SpreadsheetApp.getUi(); } catch (e) { ui = null; }
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var catSheet = ss.getSheetByName(SHEET_CATEGORY);
+  if (!catSheet) {
+    var noCatMsg = "분류_설정 시트가 없어 유효성 표시를 적용할 수 없습니다.";
+    Logger.log("[분류 유효성 표시] " + noCatMsg);
+    if (ui) ui.alert("분류 유효성 표시", noCatMsg, ui.ButtonSet.OK);
+    return;
+  }
+
+  var MARK = SHEET_CATEGORY + "!$A:$A"; // 우리가 만든 규칙을 재실행 시 식별/제거하기 위한 표식
+  var targets = [SHEET_LOG, SHEET_INCOME];
+  var applied = [];
+
+  targets.forEach(function (name) {
+    var sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    var maxRows = sheet.getMaxRows();
+    if (maxRows < 2) return;
+
+    var mainRange = sheet.getRange(2, 3, maxRows - 1, 1); // C열 대분류
+    var subRange = sheet.getRange(2, 4, maxRows - 1, 1);  // D열 소분류
+
+    var mainFormula = '=AND($C2<>"", COUNTIF(' + MARK + ', $C2)=0)';
+    var subFormula = '=AND($D2<>"", COUNTIFS(' + MARK + ', $C2, ' +
+      SHEET_CATEGORY + '!$B:$B, $D2)=0)';
+
+    var mainRule = SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(mainFormula)
+      .setBackground(CATEGORY_INVALID_BG)
+      .setRanges([mainRange])
+      .build();
+    var subRule = SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(subFormula)
+      .setBackground(CATEGORY_INVALID_BG)
+      .setRanges([subRange])
+      .build();
+
+    // 이 함수가 예전에 만든 규칙만 제거하고, 사람이 직접 만든 다른 규칙은 보존한다
+    var kept = [];
+    var existing = sheet.getConditionalFormatRules();
+    for (var i = 0; i < existing.length; i++) {
+      var bc = existing[i].getBooleanCondition();
+      var isOurs = false;
+      if (bc && bc.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA) {
+        var vals = bc.getCriteriaValues();
+        if (vals && vals.length > 0 && String(vals[0]).indexOf(MARK) !== -1) isOurs = true;
+      }
+      if (!isOurs) kept.push(existing[i]);
+    }
+    kept.push(mainRule);
+    kept.push(subRule);
+    sheet.setConditionalFormatRules(kept);
+    applied.push(name);
+  });
+
+  var msg = applied.length > 0
+    ? "다음 시트에 분류 유효성 표시를 적용했습니다: " + applied.join(', ') + "\n\n" +
+      "분류_설정에 없는 대분류, 또는 대분류-소분류 조합이 맞지 않는 소분류가 있는 셀은 " +
+      "빨간 배경으로 표시됩니다.\n" +
+      "분류_설정을 수정하면 다시 실행하지 않아도 자동으로 갱신됩니다."
+    : "적용 대상 시트(가계부_내역/수입)를 찾지 못했습니다.";
+  Logger.log("[분류 유효성 표시] " + msg);
+  logRun("applyCategoryValidityHighlight", "성공", applied.length, msg);
+  if (ui) ui.alert("분류 유효성 표시 적용", msg, ui.ButtonSet.OK);
 }
 
 // [회귀수정] 이관전용 백업 함수 생성 (일일/주간 백업 정책과 격리)
@@ -1174,7 +1421,10 @@ function installTriggers() {
     // 실제 작업은 해가 바뀐 뒤 한 번만 일어난다. (백업 03시 이후로 배치)
     { fn: 'scheduledArchiveOldTransactions', monthDay: 2, hour: 4, desc: '과거 데이터 자동 이관 (매월 2일 04~05시)' },
     // [STEP3B] 이번 달 예산이 이미 있으면 아무 것도 하지 않으므로 매월 돌아도 안전하다.
-    { fn: 'copyBudgetToNewMonth', monthDay: 1, hour: 0, desc: '예산 지난달 값 자동 복사 (매월 1일 00~01시)' }
+    { fn: 'copyBudgetToNewMonth', monthDay: 1, hour: 0, desc: '예산 지난달 값 자동 복사 (매월 1일 00~01시)' },
+    // [신규] 매일 자동입력(insertRegularExpenses)은 그대로 두고, 매월 1일에 이번 달 전체
+    // 분량을 한 번에 미리 등록한다. 멱등성 키가 동일해 매일 트리거와 겹쳐도 중복되지 않는다.
+    { fn: 'insertRegularExpensesForMonth', monthDay: 1, hour: 1, desc: '정기 항목 이번 달 일괄 등록 (매월 1일 01~02시)' }
   ];
   var managed = plan.map(function (p) { return p.fn; });
 

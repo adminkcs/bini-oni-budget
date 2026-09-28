@@ -129,19 +129,17 @@
     function renderView() {
       const list = getFilteredTransactions();
       const exRows = list.filter(t => t.구분 === '지출');
-      const inRows = list.filter(t => t.구분 === '수입');
       const exSum = exRows.reduce((a,b) => a+Math.abs(b.금액), 0);
-      const inSum = inRows.reduce((a,b) => a+Math.abs(b.금액), 0);
 
       // [STEP3B] 전월 대비. 필터와 무관하게 '해당 월 전체' 기준으로 비교한다.
       const ym = currentYearMonth();
       const { cur, prev } = monthTotalsPair(ym, prevYearMonth(ym));
 
-      // [버그수정] 총지출 카드는 드릴다운/필터와 무관하게 항상 '해당 월 전체 총지출'을 보여준다.
+      // [버그수정] 총지출/총수입/순잔액 카드는 드릴다운/필터와 무관하게 항상 '해당 월 전체' 기준을 보여준다.
       document.getElementById('m-expense').innerText = formatWon(cur.expense);
-      document.getElementById('m-income').innerText = formatWon(inSum);
-      document.getElementById('m-net').innerText = formatWon(inSum - exSum);
-      document.getElementById('m-net').style.color = (inSum - exSum < 0) ? 'var(--danger)' : 'var(--text)';
+      document.getElementById('m-income').innerText = formatWon(cur.income);
+      document.getElementById('m-net').innerText = formatWon(cur.net);
+      document.getElementById('m-net').style.color = (cur.net < 0) ? 'var(--danger)' : 'var(--text)';
 
       document.getElementById('m-expense-delta').innerHTML = deltaHtml(cur.expense, prev.expense, true);
       document.getElementById('m-income-delta').innerHTML = deltaHtml(cur.income, prev.income, false);

@@ -245,18 +245,16 @@
     function renderView() {
       const filtered = getFilteredTransactions();
       const expenses = filtered.filter(t => t.구분 === '지출');
-      const ex = expenses.reduce((a, b) => a + Math.abs(b.금액), 0);
-      const in_ = filtered.filter(t => t.구분 === '수입').reduce((a, b) => a + Math.abs(b.금액), 0);
 
       // [STEP3B] 전월 대비. 필터와 무관하게 '해당 월 전체' 기준으로 비교한다.
       const ym = currentYearMonth();
       const { cur, prev } = monthTotalsPair(ym, prevYearMonth(ym));
 
-      // [버그수정] 총지출 카드는 드릴다운/필터와 무관하게 항상 '해당 월 전체 총지출'을 보여준다.
+      // [버그수정] 총지출/총수입/순잔액 카드는 드릴다운/필터와 무관하게 항상 '해당 월 전체' 기준을 보여준다.
       document.getElementById('sc-expense').innerText = formatWon(cur.expense);
-      document.getElementById('sc-income').innerText = formatWon(in_);
-      document.getElementById('sc-net').innerText = formatWon(in_ - ex);
-      document.getElementById('sc-net').className = 'scorecard-number ' + (in_ - ex < 0 ? 'danger' : 'ok');
+      document.getElementById('sc-income').innerText = formatWon(cur.income);
+      document.getElementById('sc-net').innerText = formatWon(cur.net);
+      document.getElementById('sc-net').className = 'scorecard-number ' + (cur.net < 0 ? 'danger' : 'ok');
       document.getElementById('sc-count').innerText = expenses.length + '건';
 
       document.getElementById('sc-expense-delta').innerHTML = deltaHtml(cur.expense, prev.expense, true);
