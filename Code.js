@@ -1050,6 +1050,46 @@ function validateCategorySheet() {
  *          조합이 분류_설정에 없으면 표시 (대분류가 바뀌어 붕 뜬 소분류 탐지)
  * ==============================================================================
  */
+var CATVALID_MAIN_HEADER = "_분류유효성_대분류"; // [신규] 숨김 헬퍼 열 헤더명 (대분류 판정)
+var CATVALID_SUB_HEADER = "_분류유효성_소분류";   // [신규] 숨김 헬퍼 열 헤더명 (대분류+소분류 조합 판정)
+
+/**
+ * 이름이 name인 열을 찾아 반환하고, 없으면 마지막 열 뒤에 새로 만들어 숨긴 뒤 반환한다.
+ * ensureWeightColumn과 같은 패턴 — 기존 컬럼 순서를 건드리지 않는다.
+ */
+function ensureHelperColumn(sheet, name) {
+  var lastCol = sheet.getLastColumn();
+  var headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+  for (var c = 0; c < headers.length; c++) {
+    if (String(headers[c]).trim() === name) return c + 1;
+  }
+  var col = lastCol + 1;
+  sheet.getRange(1, col).setValue(name);
+  sheet.hideColumns(col);
+  return col;
+}
+
+/**
+ * ==============================================================================
+ * ★ [신규] 대분류/소분류 유효성 표시 (조건부서식)
+ * [배경] 가계부 초기라 분류_설정의 대분류/소분류가 자주 바뀐다. 이미 기록된
+ *   가계부_내역/수입 행의 대분류·소분류가 분류_설정에서 지워지거나 이름이
+ *   바뀌면 화면(대시보드 집계 등)에서 조용히 '기타'류로 묶여버려 알아채기 어렵다.
+ * [제약] 조건부서식 규칙(Apps Script로 생성하는 것)은 다른 시트를 직접 참조할 수
+ *   없다("Exception: 조건부 서식 규칙은 다른 시트를 참조할 수 없습니다"). 그래서
+ *   분류_설정 조회는 같은 시트 안의 숨김 헬퍼 열(_분류유효성_대분류/소분류)에
+ *   일반 셀 수식(ARRAYFORMULA)으로 미리 계산해두고, 조건부서식은 그 헬퍼 열만
+ *   같은 시트에서 참조한다. 일반 셀 수식은 다른 시트 참조 제약이 없다.
+ * [자동 갱신] 헬퍼 열이 $C2:$C, $D2:$D 전체(빈 행 포함)를 대상으로 한 열린 범위
+ *   ARRAYFORMULA라서, 이후 행이 늘어나도 재실행 없이 자동으로 이어서 계산된다.
+ *   분류_설정을 수정해도 즉시 재계산된다. 그래서 트리거에는 넣지 않고
+ *   [가계부 도구] 메뉴에서 최초 1회(또는 시트를 새로 만들었을 때) 실행하면 된다.
+ * [체크 범위] 대분류(C열)만이 아니라 대분류+소분류 조합(트리 구조)까지 검증한다.
+ *   - C열: 분류_설정의 대분류 목록에 아예 없으면 표시
+ *   - D열: 소분류명은 어딘가에 존재해도, "이 행의 대분류 밑에 이 소분류"라는
+ *          조합이 분류_설정에 없으면 표시 (대분류가 바뀌어 붕 뜬 소분류 탐지)
+ * ==============================================================================
+ */
 function applyCategoryValidityHighlight() {
   var ui = null;
   try { ui = SpreadsheetApp.getUi(); } catch (e) { ui = null; }
@@ -1063,7 +1103,6 @@ function applyCategoryValidityHighlight() {
     return;
   }
 
-  var MARK = SHEET_CATEGORY + "!$A:$A"; // 우리가 만든 규칙을 재실행 시 식별/제거하기 위한 표식
   var targets = [SHEET_LOG, SHEET_INCOME];
   var applied = [];
 
@@ -1073,20 +1112,30 @@ function applyCategoryValidityHighlight() {
     var maxRows = sheet.getMaxRows();
     if (maxRows < 2) return;
 
+    var mainCol = ensureHelperColumn(sheet, CATVALID_MAIN_HEADER);
+    var subCol = ensureHelperColumn(sheet, CATVALID_SUB_HEADER);
+    var mainLetter = columnToLetter(mainCol);
+    var subLetter = columnToLetter(subCol);
+
+    // [같은 시트 헬퍼 열] 전체 열린 범위($C2:$C)를 한 번의 ARRAYFORMULA로 계산한다.
+    // 다른 시트(분류_설정) 참조는 '일반 셀 수식'이라 문제없다 — 막히는 건 조건부서식 쪽뿐이다.
+    var mainHelperFormula = '=ARRAYFORMULA(IF($C2:$C="","",IF(COUNTIF(' +
+      SHEET_CATEGORY + '!$A:$A,$C2:$C)=0,"X","")))';
+    var subHelperFormula = '=ARRAYFORMULA(IF($D2:$D="","",IF(COUNTIFS(' +
+      SHEET_CATEGORY + '!$A:$A,$C2:$C,' + SHEET_CATEGORY + '!$B:$B,$D2:$D)=0,"X","")))';
+    sheet.getRange(2, mainCol).setFormula(mainHelperFormula);
+    sheet.getRange(2, subCol).setFormula(subHelperFormula);
+
     var mainRange = sheet.getRange(2, 3, maxRows - 1, 1); // C열 대분류
     var subRange = sheet.getRange(2, 4, maxRows - 1, 1);  // D열 소분류
 
-    var mainFormula = '=AND($C2<>"", COUNTIF(' + MARK + ', $C2)=0)';
-    var subFormula = '=AND($D2<>"", COUNTIFS(' + MARK + ', $C2, ' +
-      SHEET_CATEGORY + '!$B:$B, $D2)=0)';
-
     var mainRule = SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied(mainFormula)
+      .whenFormulaSatisfied('=$' + mainLetter + '2="X"')
       .setBackground(CATEGORY_INVALID_BG)
       .setRanges([mainRange])
       .build();
     var subRule = SpreadsheetApp.newConditionalFormatRule()
-      .whenFormulaSatisfied(subFormula)
+      .whenFormulaSatisfied('=$' + subLetter + '2="X"')
       .setBackground(CATEGORY_INVALID_BG)
       .setRanges([subRange])
       .build();
@@ -1099,7 +1148,9 @@ function applyCategoryValidityHighlight() {
       var isOurs = false;
       if (bc && bc.getCriteriaType() === SpreadsheetApp.BooleanCriteria.CUSTOM_FORMULA) {
         var vals = bc.getCriteriaValues();
-        if (vals && vals.length > 0 && String(vals[0]).indexOf(MARK) !== -1) isOurs = true;
+        if (vals && vals.length > 0 &&
+            (String(vals[0]).indexOf('$' + mainLetter + '2') !== -1 ||
+             String(vals[0]).indexOf('$' + subLetter + '2') !== -1)) isOurs = true;
       }
       if (!isOurs) kept.push(existing[i]);
     }
