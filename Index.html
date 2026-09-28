@@ -234,6 +234,7 @@
       searchKeyword = '';
       const si = document.getElementById('search-input');
       if (si) si.value = '';
+      budgetDrillMain = null;
       clearDrilldown();      // renderView 포함
       refreshMsFilters();
     }
@@ -247,15 +248,17 @@
       const ex = expenses.reduce((a, b) => a + Math.abs(b.금액), 0);
       const in_ = filtered.filter(t => t.구분 === '수입').reduce((a, b) => a + Math.abs(b.금액), 0);
 
-      document.getElementById('sc-expense').innerText = formatWon(ex);
+      // [STEP3B] 전월 대비. 필터와 무관하게 '해당 월 전체' 기준으로 비교한다.
+      const ym = currentYearMonth();
+      const { cur, prev } = monthTotalsPair(ym, prevYearMonth(ym));
+
+      // [버그수정] 총지출 카드는 드릴다운/필터와 무관하게 항상 '해당 월 전체 총지출'을 보여준다.
+      document.getElementById('sc-expense').innerText = formatWon(cur.expense);
       document.getElementById('sc-income').innerText = formatWon(in_);
       document.getElementById('sc-net').innerText = formatWon(in_ - ex);
       document.getElementById('sc-net').className = 'scorecard-number ' + (in_ - ex < 0 ? 'danger' : 'ok');
       document.getElementById('sc-count').innerText = expenses.length + '건';
 
-      // [STEP3B] 전월 대비. 필터와 무관하게 '해당 월 전체' 기준으로 비교한다.
-      const ym = currentYearMonth();
-      const { cur, prev } = monthTotalsPair(ym, prevYearMonth(ym));
       document.getElementById('sc-expense-delta').innerHTML = deltaHtml(cur.expense, prev.expense, true);
       document.getElementById('sc-income-delta').innerHTML = deltaHtml(cur.income, prev.income, false);
       document.getElementById('sc-net-delta').innerHTML = deltaHtml(cur.net, prev.net, false);
@@ -264,6 +267,7 @@
 
       // [STEP3B] 예산 집행률
       document.getElementById('budget-area').innerHTML = renderBudgetHtml();
+      bindBudgetDrillClicks('budget-area');
 
       // 드릴다운 상태 반영
       document.getElementById('chart-title').innerText =

@@ -133,20 +133,23 @@
       const exSum = exRows.reduce((a,b) => a+Math.abs(b.금액), 0);
       const inSum = inRows.reduce((a,b) => a+Math.abs(b.금액), 0);
 
-      document.getElementById('m-expense').innerText = formatWon(exSum);
+      // [STEP3B] 전월 대비. 필터와 무관하게 '해당 월 전체' 기준으로 비교한다.
+      const ym = currentYearMonth();
+      const { cur, prev } = monthTotalsPair(ym, prevYearMonth(ym));
+
+      // [버그수정] 총지출 카드는 드릴다운/필터와 무관하게 항상 '해당 월 전체 총지출'을 보여준다.
+      document.getElementById('m-expense').innerText = formatWon(cur.expense);
       document.getElementById('m-income').innerText = formatWon(inSum);
       document.getElementById('m-net').innerText = formatWon(inSum - exSum);
       document.getElementById('m-net').style.color = (inSum - exSum < 0) ? 'var(--danger)' : 'var(--text)';
 
-      // [STEP3B] 전월 대비. 필터와 무관하게 '해당 월 전체' 기준으로 비교한다.
-      const ym = currentYearMonth();
-      const { cur, prev } = monthTotalsPair(ym, prevYearMonth(ym));
       document.getElementById('m-expense-delta').innerHTML = deltaHtml(cur.expense, prev.expense, true);
       document.getElementById('m-income-delta').innerHTML = deltaHtml(cur.income, prev.income, false);
       document.getElementById('m-net-delta').innerHTML = deltaHtml(cur.net, prev.net, false);
 
       // [STEP3B] 예산 집행률
       document.getElementById('m-budget').innerHTML = renderBudgetHtml();
+      bindBudgetDrillClicks('m-budget');
 
       // [STEP3B] 드릴다운 상태 반영
       document.getElementById('m-chart-title').innerText =
