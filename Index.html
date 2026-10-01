@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
+  <script>var PERF_T0 = Date.now();</script>
   <title>비니네 오니네 가계부 (PC)</title>
   <!-- [PERF] defer: 차트는 데이터 로드 후에 그리므로 초기 렌더를 막을 이유가 없다 -->
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7"></script>
@@ -141,6 +142,7 @@
   <script>var BOOTSTRAP = <?!= getBootstrapJson() ?>;</script>
 
   <?!= include('Common'); ?>
+  <script>var SERVER_PERF = <?!= getServerPerfJson() ?>;</script>
 
   <script>
     let mainChartInstance = null;

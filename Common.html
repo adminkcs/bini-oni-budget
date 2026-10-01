@@ -186,7 +186,7 @@
       .replace(/'/g, "&#039;");
   }
 
-  window.addEventListener('DOMContentLoaded', () => { loadData(); });
+  window.addEventListener('DOMContentLoaded', () => { loadPerf.dcl = Date.now(); loadData(); });
 
   document.addEventListener('click', function(e) {
     const editBtn = e.target.closest('.btn-edit-action');
@@ -214,6 +214,7 @@
     //   부트스트랩이 없거나 실패(null)면 기존 비동기 경로로 자동 폴백한다.
     if (!bootstrapConsumed && typeof BOOTSTRAP !== 'undefined' && BOOTSTRAP) {
       bootstrapConsumed = true;
+      loadPerf.viaBootstrap = true;
       onDataLoaded(BOOTSTRAP);
       return;
     }
@@ -255,6 +256,8 @@
     buildQuickAddItems();
     buildBudgetMap();          // [STEP3B] 예산_설정 파싱
 
+    const firstLoad = isInitialLoad;
+    if (firstLoad) loadPerf.dataDone = Date.now();
     if (isInitialLoad) {
       if (typeof buildMultiSelectFilters === 'function') buildMultiSelectFilters(); // [STEP3B] PC 다중 필터
       initDateRange();
@@ -265,6 +268,86 @@
     document.getElementById('loading-overlay').style.display = 'none';
     if(document.getElementById('updated-at')) document.getElementById('updated-at').innerText = '최근 갱신: ' + new Date().toLocaleTimeString('ko-KR');
     if (typeof renderView === 'function') renderView();
+    if (firstLoad) reportLoadPerf();
+  }
+
+  // ---------------------------------------------------------------------------
+  // [계측] 첫 화면 로딩 구간별 소요 시간 → 서버 '로딩_로그' 시트에 1행 기록
+  //   화면을 다 그린 뒤 비동기로 보내므로 사용자가 기다리는 시간에는 영향이 없다.
+  //   서버 시각(SERVER_PERF.start, rs)과 브라우저 시각이 섞인 값은 두 시계 차이만큼 오차가 있다.
+  // ---------------------------------------------------------------------------
+  const loadPerf = { dcl: 0, dataDone: 0, viaBootstrap: false, hiddenAtStart: document.visibilityState === 'hidden' };
+  const ROUTER_HOP_MAX_MS = 120000; // 이보다 오래된 rt는 새로고침·즐겨찾기로 주소에 남은 값이라 버린다
+
+  function buildLoadPerfRecord(t) {
+    const s = t.server || {};
+    const r = s.router || {};
+    const hopRaw = r.rt > 0 ? t.origin - r.rt : -1;
+    const viaRouter = hopRaw >= 0 && hopRaw <= ROUTER_HOP_MAX_MS;
+    const d = (a, b) => (a > 0 && b > 0) ? Math.round(a - b) : '';
+    const num = v => (typeof v === 'number' && isFinite(v)) ? v : '';
+    const hop = viaRouter ? Math.round(hopRaw) : '';
+    const start = viaRouter ? (r.rs || r.r0) : s.start;
+    return {
+      화면: s.view || '',
+      진입: !t.viaBootstrap ? '폴백(비동기)' : viaRouter ? (r.rm ? '라우터(수동버튼)' : '라우터') : '직접',
+      총소요: d(t.paint, start),
+      라우터: viaRouter ? d(r.rt, r.r0) : '',
+      '서버+전달': hop,
+      서버합계: num(s.total),
+      '구글/네트워크': (hop !== '' && typeof s.total === 'number') ? hop - s.total : '',
+      권한확인: (num(s.auth) || 0) + (num(s.dataAuth) || 0),
+      시트조회: num(s.batchGet),
+      데이터가공: num(s.parse),
+      직렬화: num(s.serialize),
+      템플릿: num(s.template),
+      스크립트시작: d(t.t0, t.origin),
+      DOM준비: d(t.dcl, t.t0),
+      데이터반영: d(t.dataDone, t.dcl),
+      렌더: d(t.paint, t.dataDone),
+      'Chart.js': num(t.chartMs),
+      HTML용량KB: num(s.kb),
+      거래건수: num(t.txnCount),
+      네트워크: t.net || '',
+      기기: t.device || '',
+      상세: {
+        서버: s, 브라우저: { origin: t.origin, t0: t.t0, dcl: t.dcl, dataDone: t.dataDone, paint: t.paint },
+        '서버끝→화면시작(시계차 포함)': d(t.origin, s.end),
+        숨김시작: !!t.hiddenAtStart, 숨김전송: !!t.hiddenNow, batchGet성공: s.batchGetOk !== false
+      }
+    };
+  }
+
+  function navStartMs() {
+    if (typeof performance === 'undefined') return 0;
+    return performance.timeOrigin || (performance.timing && performance.timing.navigationStart) || 0;
+  }
+
+  function chartResourceMs() {
+    try {
+      const e = performance.getEntriesByType('resource').find(x => /chart\.js/.test(x.name));
+      return e ? Math.round(e.duration) : '';
+    } catch (e) { return ''; }
+  }
+
+  function reportLoadPerf() {
+    if (typeof google === 'undefined' || !google.script || !google.script.run) return;
+    // 다음 프레임까지 기다려 실제로 그려진 시점을 잡는다
+    requestAnimationFrame(() => setTimeout(() => {
+      try {
+        const c = navigator.connection || {};
+        const rec = buildLoadPerfRecord({
+          server: (typeof SERVER_PERF !== 'undefined' && SERVER_PERF) || {},
+          origin: navStartMs(), t0: (typeof PERF_T0 !== 'undefined') ? PERF_T0 : 0,
+          dcl: loadPerf.dcl, dataDone: loadPerf.dataDone, paint: Date.now(),
+          viaBootstrap: loadPerf.viaBootstrap, chartMs: chartResourceMs(), txnCount: allTransactions.length,
+          net: c.effectiveType ? `${c.effectiveType} ${c.downlink || '?'}Mbps` : '',
+          device: `${/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent) ? '모바일' : 'PC'} ${window.innerWidth}px`,
+          hiddenAtStart: loadPerf.hiddenAtStart, hiddenNow: document.visibilityState === 'hidden'
+        });
+        google.script.run.withFailureHandler(() => {}).logPageLoad(rec);
+      } catch (e) { /* 계측 실패가 화면을 막지 않도록 무시 */ }
+    }, 0));
   }
 
   // [PERF] 서버 응답(전체 조회 / 단건 변경) 모두 같은 형태로 정규화하기 위해 공용화

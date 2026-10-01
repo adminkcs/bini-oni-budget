@@ -103,14 +103,95 @@ function assertAuthorized() {
  */
 var ICON_URL = 'https://raw.githubusercontent.com/adminkcs/bini-oni-budget/main/assets/icon-192.png';
 
+/**
+ * ==============================================================================
+ * ★ [계측] 첫 화면 로딩 구간별 소요 시간
+ * 한 번의 doGet 실행 안에서만 쓰는 전역이다(실행마다 새로 뜨므로 사용자 간에 섞이지 않는다).
+ * 서버 구간은 SERVER_PERF로 페이지에 심어 보내고, 브라우저가 화면을 다 그린 뒤
+ * 브라우저 구간과 합쳐 logPageLoad()로 '로딩_로그' 시트에 1행을 남긴다.
+ * ==============================================================================
+ */
+var _loadPerf = { start: 0, auth: 0, dataAuth: 0, batchGet: 0, batchGetOk: true, parse: 0, data: 0, serialize: 0, kb: 0, rows: {}, view: '', router: null };
+
+function getDoGetStart() { return _loadPerf.start || Date.now(); }
+
+/** 템플릿 맨 끝에서 호출된다. 이 시점까지가 서버 처리 시간이다. */
+function getServerPerfJson() {
+  const p = _loadPerf;
+  const end = Date.now();
+  const total = end - p.start;
+  const out = {
+    view: p.view, start: p.start, end: end, total: total,
+    auth: p.auth, dataAuth: p.dataAuth, batchGet: p.batchGet, batchGetOk: p.batchGetOk,
+    parse: p.parse, serialize: p.serialize, kb: p.kb, rows: p.rows,
+    template: Math.max(0, total - p.auth - p.data - p.serialize),
+    router: p.router
+  };
+  console.log('[로딩계측] 서버 ' + JSON.stringify(out));
+  return toSafeJson(out);
+}
+
+/** 라우터가 붙여 보낸 시각(rs/r0/rt/rm)을 숫자로만 받아 둔다 */
+function readRouterParams(p) {
+  const num = function (v) { const n = Number(v); return isFinite(n) && n > 0 ? n : 0; };
+  if (!p || !p.rt) return null;
+  return { rs: num(p.rs), r0: num(p.r0), rt: num(p.rt), rm: p.rm === '1' };
+}
+
+var SHEET_LOADLOG = '로딩_로그';
+var LOADLOG_MAX_ROWS = 1000;
+var LOADLOG_FIELDS = [
+  '화면', '진입', '총소요', '라우터', '서버+전달', '서버합계', '구글/네트워크',
+  '권한확인', '시트조회', '데이터가공', '직렬화', '템플릿',
+  '스크립트시작', 'DOM준비', '데이터반영', '렌더', 'Chart.js',
+  'HTML용량KB', '거래건수', '네트워크', '기기'
+];
+
+/** 브라우저가 화면을 다 그린 뒤 비동기로 호출한다. 실패해도 화면에는 영향이 없다. */
+function logPageLoad(m) {
+  try { assertAuthorized(); } catch (e) { return { ok: false }; }
+  try {
+    m = m || {};
+    const cell = function (v) {
+      if (typeof v === 'number') return isFinite(v) ? Math.round(v) : '';
+      if (typeof v === 'string') return v.substring(0, 60);
+      return '';
+    };
+    const row = [new Date(), getCurrentEmail()]
+      .concat(LOADLOG_FIELDS.map(function (k) { return cell(m[k]); }))
+      .concat([String(JSON.stringify(m.상세 || {})).substring(0, 3000)]);
+    console.log('[로딩계측] ' + JSON.stringify(row));
+
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    let sheet = ss.getSheetByName(SHEET_LOADLOG);
+    if (!sheet) {
+      sheet = ss.insertSheet(SHEET_LOADLOG);
+      sheet.getRange(1, 1, 1, row.length).setValues([['시각', '사용자'].concat(LOADLOG_FIELDS, ['상세'])]);
+      sheet.setFrozenRows(1);
+      sheet.getRange('A:A').setNumberFormat('yyyy-MM-dd HH:mm:ss');
+    }
+    sheet.appendRow(row);
+    const last = sheet.getLastRow();
+    if (last > LOADLOG_MAX_ROWS + 1) sheet.deleteRows(2, last - LOADLOG_MAX_ROWS - 1);
+    return { ok: true };
+  } catch (e) {
+    console.log('[로딩계측] 기록 실패: ' + (e && e.message ? e.message : e));
+    return { ok: false };
+  }
+}
+
 function doGet(e) {
+  _loadPerf.start = Date.now();
   try {
     assertAuthorized();
   } catch(err) {
     return HtmlService.createHtmlOutput('<div style="padding: 24px; font-family: sans-serif; text-align: center;"><h3>' + err.message + '</h3></div>').setTitle('접근 차단');
   }
+  _loadPerf.auth = Date.now() - _loadPerf.start;
 
   const view = e.parameter.view;
+  _loadPerf.view = view || 'router';
+  _loadPerf.router = readRouterParams(e.parameter);
   let templateName = 'Router'; 
 
   if (view === 'pc') templateName = 'Index';
@@ -167,7 +248,14 @@ function escapeForScriptTag(json) {
  */
 function getBootstrapJson() {
   try {
-    return toSafeJson(getDashboardData());
+    const t0 = Date.now();
+    const data = getDashboardData();
+    const t1 = Date.now();
+    const json = toSafeJson(data);
+    _loadPerf.data = t1 - t0;
+    _loadPerf.serialize = Date.now() - t1;
+    _loadPerf.kb = Math.round(json.length / 1024);
+    return json;
   } catch (e) {
     Logger.log('[부트스트랩 실패] ' + (e && e.message ? e.message : e));
     return 'null';
@@ -180,7 +268,9 @@ function include(filename) {
 
 function getDashboardData(includeArchive = false) {
   // [회귀수정] 에러 사유를 삼키지 않고 _error 플래그에 담아 반환
-  try { assertAuthorized(); } catch(e) { return { _error: e.message }; } 
+  const tAuth = Date.now();
+  try { assertAuthorized(); } catch(e) { return { _error: e.message }; }
+  _loadPerf.dataAuth = Date.now() - tAuth;
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const spreadsheetId = ss.getId();
@@ -241,6 +331,7 @@ function getDashboardData(includeArchive = false) {
   const REG_TAB = SHEET_REGULAR;
   const ALL_TABS = TARGET_TABS.concat([REG_TAB]);
   let valuesByTab = null;
+  const tBatch = Date.now();
   try {
     const resp = Sheets.Spreadsheets.Values.batchGet(spreadsheetId, {
       ranges: ALL_TABS.map(function (name) { return "'" + name + "'"; }),
@@ -253,7 +344,10 @@ function getDashboardData(includeArchive = false) {
     });
   } catch (e) {
     Logger.log('[getDashboardData] batchGet 실패(' + e.message + ') → 개별 조회로 폴백');
+    _loadPerf.batchGetOk = false;
   }
+  _loadPerf.batchGet = Date.now() - tBatch;
+  const tParse = Date.now();  // 폴백 시에는 시트별 개별 조회 시간도 여기에 포함된다
 
   // [폴백 전용] batchGet이 실패했을 때만 채워지는 시트 맵. 성공 시엔 호출되지 않는다.
   const sheetByName = {};
@@ -334,6 +428,8 @@ function getDashboardData(includeArchive = false) {
     if (sub) result['_정기소분류'].push(sub);
   }
 
+  _loadPerf.parse = Date.now() - tParse;
+  TARGET_TABS.forEach(function (t) { _loadPerf.rows[t] = (result[t] || []).length; });
   return result;
 }
 

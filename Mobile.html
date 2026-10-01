@@ -2,6 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
+  <script>var PERF_T0 = Date.now();</script>
   <title>비니네 오니네 가계부 (Mobile)</title>
   <style>
     :root { --bg: #F3F5F8; --surface: #FFFFFF; --surface-2: #F8F9FB; --border: #E5E8EE; --text: #1A1A1A; --text-dim: #6B7280; --accent: #0046FF; --ok: #16A55C; --danger: #D62B3F; }
@@ -116,6 +117,7 @@
   <script>var BOOTSTRAP = <?!= getBootstrapJson() ?>;</script>
 
   <?!= include('Common'); ?>
+  <script>var SERVER_PERF = <?!= getServerPerfJson() ?>;</script>
 
   <script>
     let openDate = null;

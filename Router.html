@@ -28,12 +28,20 @@
   </div>
 
   <script>
+    // [계측] 라우터 구간 시각을 다음 화면으로 넘긴다 (rs: 서버 시각, r0/rt: 이 브라우저 시각)
+    var ROUTER_SERVER_START = <?!= Number(getDoGetStart()) ?>;
+    var ROUTER_ORIGIN = Math.round((window.performance && performance.timeOrigin) ||
+                                   (window.performance && performance.timing && performance.timing.navigationStart) || Date.now());
+
     window.onload = function () {
       var isMobile = window.innerWidth <= 768 || /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
       var base = "<?= ScriptApp.getService().getUrl() ?>";
-      var target = base + (isMobile ? "?view=mobile" : "?view=pc");
+      var viewUrl = base + (isMobile ? "?view=mobile" : "?view=pc") + "&rs=" + ROUTER_SERVER_START + "&r0=" + ROUTER_ORIGIN;
+      var target = viewUrl + "&rt=" + Date.now();
 
-      document.getElementById('manual-link').href = target;
+      var manual = document.getElementById('manual-link');
+      manual.href = target;
+      manual.addEventListener('click', function () { manual.href = viewUrl + "&rt=" + Date.now() + "&rm=1"; });
 
       var settled = false;
       function showManual(reason) {
