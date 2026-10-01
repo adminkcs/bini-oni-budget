@@ -399,6 +399,41 @@ npm run redeploy -- -V 11 -d "롤백"
 > 제한된다. 별도의 기간 제한 로직을 두지 않은 이유다. 다만 **아카이빙은 수동 실행**이므로,
 > 한 번도 돌리지 않으면 이 상한이 성립하지 않는다. 연 1회 정도는 실행할 것.
 
+## 정적 웹 시험판 (읽기 전용) — `web/` → `docs/`
+
+Apps Script 감싸기(배너 + 약 1~5초)를 없애기 위한 시험판이다. 화면은 GitHub Pages에서 받고,
+데이터는 브라우저가 Sheets API로 직접 읽는다. 저장·수정·삭제는 막혀 있다(기존 앱 사용).
+
+| 파일 | 역할 |
+|---|---|
+| `web/sheets-data.js` | batchGet 결과 → 대시보드 데이터 변환. 서버 `getDashboardData`와 같은 결과를 `test/web-data.test.js`가 보장 |
+| `web/static-adapter.js` | Google 로그인(토큰), 시트 읽기, 마지막 데이터 저장·즉시 표시, 읽기 전용 차단 |
+| `scripts/build-web.mjs` | `Mobile.html` + `Common.html` → `docs/index.html` (`npm run build:web`). 화면 코드를 두 벌로 두지 않는다 |
+| `docs/` | 빌드 결과물. GitHub Pages가 서비스한다. `.claspignore`로 Apps Script 업로드에서 제외 |
+
+화면(`Mobile.html`/`Common.html`)을 고친 뒤에는 `npm run build:web`을 다시 실행해 `docs/`를 갱신한다.
+
+### 최초 설정 (관리자 1회)
+
+1. **GitHub Pages 켜기:** 저장소 Settings → Pages → Source `Deploy from a branch` → Branch `main` / 폴더 `/docs` → Save.
+   주소: `https://adminkcs.github.io/bini-oni-budget/`
+2. **Google Cloud 프로젝트** ([console.cloud.google.com](https://console.cloud.google.com), 관리자 계정)
+   - 새 프로젝트 생성 → API 및 서비스 → 라이브러리 → **Google Sheets API 사용 설정**
+   - Google 인증 플랫폼(OAuth 동의 화면) → 대상: 외부 / 상태: **테스트** → 테스트 사용자에 **가족 계정 이메일 추가**
+   - 클라이언트 → 클라이언트 만들기 → 유형 **웹 애플리케이션** →
+     승인된 JavaScript 원본: `https://adminkcs.github.io` → 만들기 → **클라이언트 ID 복사**
+3. **시험판 주소 만들기:** `https://adminkcs.github.io/bini-oni-budget/#cid=<클라이언트 ID>&sid=<스프레드시트 ID>`
+   - 처음 한 번 이 주소로 열면 두 값이 그 브라우저에 저장되고 주소창에서는 지워진다.
+   - 두 ID는 저장소(공개)에 넣지 않는다. 가족에게는 이 주소를 메신저로 따로 전달한다.
+
+### 사용과 한계
+- 처음엔 하단의 **Google 로그인**을 누른다(팝업 차단 때문에 사용자가 눌러야만 로그인 창을 띄울 수 있다).
+  로그인은 약 1시간 유지되고, 그 뒤엔 저장본을 먼저 보여 주고 다시 로그인을 요청한다.
+- 마지막으로 받은 데이터를 그 기기 브라우저에 저장한다. 공용 기기에서는 하단 **로그아웃**으로 지운다.
+- 권한은 `spreadsheets.readonly`(읽기)만 요청한다. 시트를 공유받은 계정만 읽을 수 있다.
+- 테스트 상태의 OAuth 앱은 승인이 일정 기간 뒤 만료될 수 있다 [확인 필요].
+- 하단 표시줄에 `시트 읽기 / 저장본 표시 / 최신 표시` 시간이 나오고, 콘솔에 `[시험판 계측]`으로 남는다.
+
 ## 자주 쓰는 항목 (등록 모달)
 
 등록 모달 상단의 빠른 입력 칩. 집계 규칙은 `buildQuickAddItems()`에 있다.
