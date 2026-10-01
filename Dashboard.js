@@ -297,24 +297,6 @@ function getDashboardData(includeArchive = false) {
     return s;
   }
 
-  // [PERF-batchGet] 시트 API가 SERIAL_NUMBER로 돌려준 날짜(타임존 없는 순수 일수)를
-  //   getValues()가 주는 Date와 동일한 절대시각으로 재구성한다.
-  //   toDateObject('yyyy-MM-dd')는 이미 '시트 시간대 자정'을 만드는 함수이므로 그대로 재사용한다.
-  //   (시간 성분은 이 프로젝트의 날짜 셀에서 쓰이지 않으므로 정수부만 취한다)
-  const serialDateCache = {};
-  function serialToDate(serial) {
-    let d = serialDateCache[serial];
-    if (d !== undefined) return d;
-    const days = Math.floor(serial) - 25569; // 1899-12-30 -> 1970-01-01 사이 일수
-    const utc = new Date(days * 86400 * 1000);
-    const ymd = utc.getUTCFullYear() + '-' +
-      String(utc.getUTCMonth() + 1).padStart(2, '0') + '-' +
-      String(utc.getUTCDate()).padStart(2, '0');
-    d = toDateObject(ymd);
-    serialDateCache[serial] = d;
-    return d;
-  }
-
   // [STEP3] 날짜값이 들어갈 수 있는 컬럼명. batchGet 경로에서 Date 타입이 사라지고
   //   순수 숫자(SERIAL_NUMBER)로 오기 때문에, instanceof Date 대신 헤더명으로 판별한다.
   const DATE_HEADER_NAMES = ['날짜', '년월'];
@@ -324,8 +306,8 @@ function getDashboardData(includeArchive = false) {
   //   개별 SpreadsheetApp 호출을 시트마다 하면 6개 시트 = 최대 2.5초가 걸렸다.
   //   Advanced Sheets API의 batchGet은 여러 range를 HTTP 요청 1번으로 묶는다.
   //   valueRenderOption: UNFORMATTED_VALUE로 숫자에 천단위 콤마 등 서식이 섞이는 걸 막고,
-  //   dateTimeRenderOption: SERIAL_NUMBER로 날짜를 원시 일련번호로 받아 위 serialToDate로
-  //   getValues()와 동일한 Date로 재구성한다.
+  //   dateTimeRenderOption: SERIAL_NUMBER로 날짜를 원시 일련번호로 받아 serialToYmd로
+  //   getValues() 경로와 같은 'yyyy-MM-dd' 문자열로 만든다.
   //   요청한 시트 중 하나라도 없으면 batchGet 전체가 실패하므로, 실패 시엔 기존
   //   SpreadsheetApp 방식(시트별 개별 조회)으로 폴백한다.
   const REG_TAB = SHEET_REGULAR;
@@ -398,7 +380,9 @@ function getDashboardData(includeArchive = false) {
         } else if (dateColIdxs.indexOf(j) !== -1 && typeof val === 'number') {
           // batchGet 경로: 날짜 컬럼이 SERIAL_NUMBER(순수 숫자)로 온 경우만 변환.
           //   사용자가 텍스트로 입력한 값(문자열)은 그대로 둔다(기존 동작과 동일).
-          val = fmtDateCached(serialToDate(val));
+          // [PERF] 일련번호는 시간대가 없어 Date를 거치지 않고 바로 문자열로 만든다.
+          //   (예전엔 Date로 만들었다 다시 포맷해 시간대 조회 1회 + 날짜당 formatDate 2회가 들었다)
+          val = serialToYmd(val);
         }
         if (!isBlankCell(val)) isEmptyRow = false;
         rowData[headers[j]] = val;

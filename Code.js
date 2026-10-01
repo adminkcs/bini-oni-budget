@@ -88,6 +88,16 @@ function fmtDate(v) {
 }
 
 /**
+ * Sheets API의 날짜 일련번호(1899-12-30 기준 일수, 시간대 없음)를 "yyyy-MM-dd"로 변환.
+ * 시간대 조회·Utilities.formatDate 없이 순수 계산한다. 소수부(시각)는 버린다.
+ */
+function serialToYmd(serial) {
+  var d = new Date((Math.floor(serial) - 25569) * 86400000);
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') +
+         '-' + String(d.getUTCDate()).padStart(2, '0');
+}
+
+/**
  * "yyyy-MM-dd" 문자열을 '스프레드시트 시간대의 그날 00:00'에 해당하는 Date 객체로 변환
  * [STEP2-fix] new Date(y,m,d)는 스크립트 시간대 자정이라 시트 시간대와 다르면 날짜가 밀린다.
  *   UTC 자정을 기준으로 시트 시간대의 실효 오프셋만큼 보정해, 시트에 저장했을 때
