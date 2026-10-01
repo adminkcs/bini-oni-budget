@@ -29,6 +29,7 @@
     .rank-header { display: flex; justify-content: space-between; font-size: 14px; font-weight: 700; margin-bottom: 6px; }
     .rank-bg { width: 100%; background: var(--surface-2); height: 8px; border-radius: 4px; overflow: hidden; }
     .rank-fill { height: 100%; border-radius: 4px; background: var(--accent); }
+    .drill-back { display: none; font-size: 12px; font-weight: 700; padding: 6px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); }
 
     .acc-group { border: 1px solid var(--border); border-radius: 12px; background: #fff; margin-bottom: 12px; overflow: hidden; }
     .acc-header { padding: 16px; display: flex; justify-content: space-between; align-items: center; background: var(--surface); cursor: pointer; }
@@ -86,14 +87,17 @@
     </div>
 
     <div id="tab-pane-budget">
+      <div class="title" id="m-budget-head" style="margin-bottom:14px; display:none;">
+        <span id="m-budget-title"></span>
+        <button type="button" id="m-budget-drill-back" class="drill-back" onclick="clearBudgetDrilldown()">← 대분류로</button>
+      </div>
       <div id="m-budget"></div>
     </div>
 
     <div id="tab-pane-analysis" style="display:none;">
       <div class="title" style="margin-bottom:14px;">
         <span id="m-chart-title">지출 분석</span>
-        <button type="button" id="m-drill-back" onclick="clearDrilldown()"
-                style="display:none; font-size:12px; font-weight:700; padding:6px 12px; border:1px solid var(--border); border-radius:8px; background:var(--surface-2);">← 대분류로</button>
+        <button type="button" id="m-drill-back" class="drill-back" onclick="clearDrilldown()">← 대분류로</button>
       </div>
       <div id="m-ranking"></div>
     </div>
@@ -146,6 +150,9 @@
       document.getElementById('m-net-delta').innerHTML = deltaHtml(cur.net, prev.net, false);
 
       // [STEP3B] 예산 집행률
+      document.getElementById('m-budget-head').style.display = budgetDrillMain ? 'flex' : 'none';
+      document.getElementById('m-budget-title').innerText = budgetDrillMain ? `예산 집행률 — ${budgetDrillMain}` : '';
+      document.getElementById('m-budget-drill-back').style.display = budgetDrillMain ? 'inline-block' : 'none';
       document.getElementById('m-budget').innerHTML = renderBudgetHtml();
       bindBudgetDrillClicks('m-budget');
 
@@ -184,9 +191,8 @@
     function renderAccordion(list) {
       const groups = {};
       list.forEach(t => { const d = t.날짜 || '-'; if(!groups[d]) groups[d] = []; groups[d].push(t); });
-      const dates = Object.keys(groups).sort((a,b) => b.localeCompare(a));
-      
       const todayStr = formatDate(new Date());
+      const dates = Object.keys(groups).sort(makeTxnDateComparator(todayStr));
       if(openDate === null && dates.length > 0) openDate = dates.includes(todayStr) ? todayStr : dates[0];
 
       let accHtml = '';
@@ -198,10 +204,10 @@
         const colorClass = daySum < 0 ? 'color:var(--danger)' : 'color:var(--ok)';
 
         accHtml += `
-          <div class="acc-group">
+          <div class="acc-group" data-date="${escapeHtml(d)}">
             <div class="acc-header" onclick="toggleAcc('${d}')">
               <div><span class="acc-date">${formatDateLabel(d)}</span><span class="acc-count">${rows.length}건</span></div>
-              <div class="acc-total" style="${colorClass}">${formatWon(daySum)} <span style="font-size:12px; margin-left:4px;">${icon}</span></div>
+              <div class="acc-total" style="${colorClass}">${formatWon(daySum)} <span class="acc-icon" style="font-size:12px; margin-left:4px;">${icon}</span></div>
             </div>
             <div class="acc-body ${isOpen ? 'open' : ''}">
         `;
@@ -235,10 +241,18 @@
       document.getElementById('m-accordion').innerHTML = accHtml || '<div style="text-align:center; padding:20px; color:var(--text-dim);">거래내역이 없습니다.</div>';
     }
 
+    // [PERF] 펼침/접힘은 해당 날짜 블록의 클래스만 바꾼다 (전체 재필터·재렌더 없음)
     function toggleAcc(dateStr) {
+      const prev = openDate;
       openDate = (openDate === dateStr) ? null : dateStr;
       if(currentSwipe) { currentSwipe.querySelector('.swipe-content').style.transform = 'translateX(0)'; currentSwipe = null; }
-      renderAccordion(getFilteredTransactions());
+      document.querySelectorAll('#m-accordion .acc-group').forEach(g => {
+        const d = g.getAttribute('data-date');
+        if (d !== prev && d !== openDate) return;
+        const isOpen = d === openDate;
+        g.querySelector('.acc-body').classList.toggle('open', isOpen);
+        g.querySelector('.acc-icon').textContent = isOpen ? '▲' : '▼';
+      });
     }
 
     // --- 스와이프 로직 ---

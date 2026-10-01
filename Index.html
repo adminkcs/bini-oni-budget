@@ -46,6 +46,14 @@
     .ms-actions { display: flex; justify-content: space-between; border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
     .ms-actions button { font-size: 12px; padding: 5px 10px; cursor: pointer; }
     .drill-clickable { cursor: pointer; }
+    .card-head { font-weight: bold; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .drill-back { display: none; font-size: 12px; padding: 6px 12px; cursor: pointer; }
+
+    /* 예산 집행률 소분류 행 (Common.html renderBudgetHtml) — 대분류 진행바와 같은 크기 */
+    .rank-row { margin-bottom: 14px; }
+    .rank-header { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; font-weight: 700; margin-bottom: 5px; }
+    .rank-bg { background: var(--surface-2); height: 9px; border-radius: 5px; overflow: hidden; }
+    .rank-fill { height: 100%; transition: width .3s; }
   </style>
 </head>
 <body>
@@ -97,15 +105,17 @@
 
     <!-- [STEP3B] 예산 집행률 -->
     <div class="card">
-      <div style="font-weight:bold; margin-bottom:14px;">예산 집행률</div>
+      <div class="card-head">
+        <span id="budget-title">예산 집행률</span>
+        <button type="button" id="budget-drill-back" class="drill-back" onclick="clearBudgetDrilldown()">← 대분류로</button>
+      </div>
       <div id="budget-area"></div>
     </div>
 
     <div class="card">
-      <div style="font-weight:bold; margin-bottom:12px; display:flex; justify-content:space-between; align-items:center;">
+      <div class="card-head">
         <span id="chart-title">지출 분석 (대분류)</span>
-        <button type="button" id="drill-back" onclick="clearDrilldown()"
-                style="display:none; font-size:12px; padding:6px 12px; cursor:pointer;">← 대분류로</button>
+        <button type="button" id="drill-back" class="drill-back" onclick="clearDrilldown()">← 대분류로</button>
       </div>
       <div style="font-size:12px; color:var(--text-dim); margin-bottom:8px;">차트 조각을 클릭하면 소분류로 나눠 봅니다.</div>
       <div class="chart-container"><canvas id="mainChart"></canvas></div>
@@ -264,6 +274,9 @@
         (isFiltered() ? '필터 적용됨' : '전체');
 
       // [STEP3B] 예산 집행률
+      document.getElementById('budget-title').innerText =
+        budgetDrillMain ? `예산 집행률 — ${budgetDrillMain} (소분류)` : '예산 집행률';
+      document.getElementById('budget-drill-back').style.display = budgetDrillMain ? 'inline-block' : 'none';
       document.getElementById('budget-area').innerHTML = renderBudgetHtml();
       bindBudgetDrillClicks('budget-area');
 
@@ -273,7 +286,8 @@
       document.getElementById('drill-back').style.display = drilldownMain ? 'inline-block' : 'none';
 
       renderChart(expenses);
-      renderTable(filtered.slice().sort((a, b) => (b.날짜 || '').localeCompare(a.날짜 || '')));
+      const cmp = makeTxnDateComparator(formatDate(new Date()));
+      renderTable(filtered.slice().sort((a, b) => cmp(a.날짜, b.날짜)));
     }
 
     function isFiltered() {
