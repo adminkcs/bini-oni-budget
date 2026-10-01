@@ -400,10 +400,12 @@ function getDashboardData(includeArchive = false) {
           //   사용자가 텍스트로 입력한 값(문자열)은 그대로 둔다(기존 동작과 동일).
           val = fmtDateCached(serialToDate(val));
         }
-        if (val !== '' && val !== null) isEmptyRow = false;
+        if (!isBlankCell(val)) isEmptyRow = false;
         rowData[headers[j]] = val;
       }
       // [PERF] _row는 프런트에서 사용처가 없고 정렬 후에는 의미도 없어 전송하지 않는다
+      // 거래 시트는 날짜 없는 행을 보내지 않는다 (화면도 buildAllTransactions에서 날짜 없는 행을 버린다)
+      if (isTxn && isBlankCell(rowData['날짜'])) continue;
       if (!isEmptyRow) data.push(rowData);
     }
     result[tabName] = data;
