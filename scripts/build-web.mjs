@@ -1,6 +1,7 @@
 // 정적 웹 빌드: Mobile.html + Common.html → docs/index.html (GitHub Pages가 docs/를 서비스)
 // Apps Script 템플릿 태그를 정적 값으로 바꾸고, 정적 웹 어댑터를 붙인다.
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 
 const read = (p) => readFileSync(p, 'utf8');
 const common = read('Common.html');
@@ -28,8 +29,10 @@ const head = [
 ].join('\n  ');
 html = html.replace('<meta charset="UTF-8">', () => '<meta charset="UTF-8">\n  ' + head);
 html = html.replace('<title>비니네 오니네 가계부 (Mobile)</title>', () => '<title>비니네 오니네 가계부</title>');
-html = html.replace('</body>', () => '  <script src="sheets-data.js"></script>\n  <script src="sheets-write.js"></script>\n' +
-  '  <script src="static-adapter.js"></script>\n</body>');
+// GitHub Pages는 스크립트를 10분간 캐시하므로, 내용이 바뀌면 주소(?v=)도 바뀌게 해 바로 새 파일을 받게 한다
+const ver = (p) => createHash('sha1').update(readFileSync(p)).digest('hex').slice(0, 8);
+const tag = (name) => '  <script src="' + name + '?v=' + ver('web/' + name) + '"></script>\n';
+html = html.replace('</body>', () => tag('sheets-data.js') + tag('sheets-write.js') + tag('static-adapter.js') + '</body>');
 
 mkdirSync('docs', { recursive: true });
 writeFileSync('docs/index.html', html);
