@@ -7,20 +7,21 @@ const b64url = o => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\
 const idToken = claims => `h.${b64url(claims)}.s`;
 
 function load(props, tokenResponse) {
-  const calls = [];
+  const calls = [], logs = [];
   const ctx = {
-    console, Logger: { log() {} },
-    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null, getProperties: () => props }) },
+    console: { log: s => logs.push(String(s)) }, Logger: { log() {} },
+    PropertiesService: { getScriptProperties: () => ({ getProperty: k => props[k] || null, setProperty: (k, v) => { props[k] = v; }, getProperties: () => props }) },
     UrlFetchApp: { fetch: (url, opts) => { calls.push({ url, opts }); return { getResponseCode: () => tokenResponse.code, getContentText: () => JSON.stringify(tokenResponse.body) }; } },
     Utilities: {
       base64Decode: s => Array.from(Buffer.from(s, 'base64')),
-      newBlob: bytes => ({ getDataAsString: () => Buffer.from(bytes).toString('utf8') })
+      newBlob: bytes => ({ getDataAsString: () => Buffer.from(bytes).toString('utf8') }),
+      formatDate: () => '10-02 07:00:00'
     },
     ContentService: { createTextOutput: s => ({ s, setMimeType() { return this; } }), MimeType: { JSON: 'json' } }
   };
   vm.createContext(ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'token-service', 'Code.js'), 'utf8'), ctx);
-  return { ctx, calls };
+  return { ctx, calls, logs };
 }
 
 const PROPS = { CLIENT_ID: 'cid', CLIENT_SECRET: 'secret', ALLOWED_EMAILS: '["me@example.com","fam@example.com"]' };
@@ -66,6 +67,33 @@ console.log('\n=== doPost ===');
 {
   const { ctx } = load(PROPS, okBody({}));
   r.check('잘못된 JSON도 안전하게 처리', JSON.parse(ctx.doPost({ postData: { contents: '{bad' } }).s).error, 'bad_request');
+}
+
+console.log('\n=== 실행 기록 ===');
+const post = (ctx, body) => ctx.doPost({ postData: { contents: JSON.stringify(body) } });
+{
+  const { ctx, logs } = load(PROPS, okBody({ email: 'me@example.com' }, null, { refresh_token: 'RT-SECRET' }));
+  post(ctx, { action: 'code', code: 'CODE-SECRET' });
+  r.check('로그인 성공 기록', logs[0], '로그인 성공 | me@example.com');
+  r.check('기록에 토큰·코드·비밀값 없음', /AT|RT-SECRET|CODE-SECRET|secret/.test(logs.join(' ')), false);
+}
+{
+  const { ctx, logs } = load(PROPS, okBody({ email: 'stranger@example.com' }));
+  post(ctx, { action: 'refresh', refresh_token: 'RT' });
+  r.check('거절 사유와 계정 기록', logs[0], '갱신 거절(not_allowed) | stranger@example.com');
+}
+{
+  const { ctx, logs } = load(PROPS, { code: 400, body: { error: 'invalid_grant' } });
+  post(ctx, { action: 'refresh', refresh_token: 'RT' });
+  r.check('끊긴 열쇠 기록', logs[0], '갱신 거절(invalid_grant) | 계정 모름');
+}
+{
+  const props = Object.assign({}, PROPS);
+  const { ctx } = load(props, okBody({ email: 'fam@example.com' }));
+  for (let i = 0; i < 35; i++) post(ctx, { action: 'refresh', refresh_token: 'RT' });
+  const saved = JSON.parse(props.RECENT_LOG);
+  r.check('최근 기록 보관(최신 먼저)', saved[0], '10-02 07:00:00 갱신 성공 | fam@example.com');
+  r.check('최근 기록은 30줄까지만', saved.length, 30);
 }
 
 r.done();

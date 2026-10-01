@@ -20,11 +20,41 @@ var ALLOWED_SCOPES = [
   'email'
 ];
 
+var lastEmail_ = ''; // 실행 기록용: 이번 요청에서 확인한 계정 (거절된 경우 포함)
+
 function doPost(e) {
   var body = {};
   try { body = JSON.parse((e && e.postData && e.postData.contents) || '{}'); } catch (x) { body = {}; }
-  return ContentService.createTextOutput(JSON.stringify(handleTokenRequest_(body)))
+  lastEmail_ = '';
+  var result = handleTokenRequest_(body);
+  logRequest_(body.action, result);
+  return ContentService.createTextOutput(JSON.stringify(result))
     .setMimeType(ContentService.MimeType.JSON);
+}
+
+var LOG_KEY = 'RECENT_LOG', LOG_MAX = 30;
+
+/**
+ * 요청 1건을 한 줄로 남긴다. 토큰·코드·비밀값은 절대 남기지 않는다.
+ * 웹 앱 실행의 console 기록은 실행 화면에서 보이지 않아, 최근 30줄을 스크립트 속성에 보관한다.
+ */
+function logRequest_(action, result) {
+  var kind = action === 'code' ? '로그인' : action === 'refresh' ? '갱신' : '기타';
+  var outcome = result.error ? '거절(' + result.error + ')' : '성공';
+  var line = kind + ' ' + outcome + ' | ' + (lastEmail_ || '계정 모름');
+  console.log(line);
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var list = parseList_(props.getProperty(LOG_KEY));
+    list.unshift(Utilities.formatDate(new Date(), 'Asia/Seoul', 'MM-dd HH:mm:ss') + ' ' + line);
+    props.setProperty(LOG_KEY, JSON.stringify(list.slice(0, LOG_MAX)));
+  } catch (x) { /* 기록 실패가 로그인을 막으면 안 된다 */ }
+}
+
+/** 편집기에서 실행: 최근 요청 기록(최신순)을 실행 로그에 보여 준다 */
+function showRecentLog() {
+  var list = parseList_(PropertiesService.getScriptProperties().getProperty(LOG_KEY));
+  Logger.log(list.length ? list.join('\n') : '기록 없음');
 }
 
 /** 웹 요청 1건 처리. 결과는 { access_token, expires_in, scope, refresh_token, email } 또는 { error } */
@@ -51,10 +81,11 @@ function handleTokenRequest_(body) {
   try { json = JSON.parse(res.getContentText() || '{}'); } catch (x) { json = {}; }
   if (res.getResponseCode() !== 200 || !json.access_token) return { error: json.error || 'token_error' };
 
+  var email = emailFromIdToken_(json.id_token);
+  lastEmail_ = email;
+
   var extra = String(json.scope || '').split(/\s+/).filter(function (s) { return s && ALLOWED_SCOPES.indexOf(s) === -1; });
   if (extra.length > 0) return { error: 'scope_not_allowed' };
-
-  var email = emailFromIdToken_(json.id_token);
   // 로그인(코드 교환)은 반드시 허용 계정이어야 한다. 갱신 응답에 이메일이 오면 그때도 확인한다.
   if (body.action === 'code' && allowed.indexOf(email) === -1) return { error: 'not_allowed' };
   if (email && allowed.indexOf(email) === -1) return { error: 'not_allowed' };
