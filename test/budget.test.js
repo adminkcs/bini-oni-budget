@@ -84,6 +84,7 @@ console.log('\n=== 월별 합계 · 전월 대비 ===');
   const inc = ctx.deltaHtml(cur.income, prev.income, false);
   r.check('수입 증가는 ok', inc.includes('var(--ok)'), true);
 
+  r.check("'전월 대비'는 항상 다음 줄", up.includes('display:block; color:var(--text-dim); font-size:12px;">전월 대비</span>'), true);
   r.check('전월 0이면 비교 불가 안내', ctx.deltaHtml(100, 0, true).includes('전월 데이터 없음'), true);
   r.check('동일하면 동일 안내', ctx.deltaHtml(100, 100, true).includes('전월과 동일'), true);
 }
@@ -122,6 +123,22 @@ console.log('\n=== 검색 · 드릴다운 필터 ===');
   evalIn(ctx, 'filterState.대분류.clear()');
 
   r.check('팔레트 순환', ctx.paletteAt(8), ctx.paletteAt(0));
+
+  // 예산 집행률 소분류: 거래내역만 그 대분류로 거르고, 지출 분석 집계는 그대로 둔다
+  evalIn(ctx, 'globalThis.renderView = function () {}');
+  ctx.setBudgetDrilldown('식비');
+  const all = ctx.getFilteredTransactions();
+  r.check('예산 소분류: 지출 분석용 목록은 전체', all.length, 3);
+  r.check('예산 소분류: 거래내역은 식비만', ctx.applyBudgetDrillToList(all).length, 2);
+  ctx.clearBudgetDrilldown();
+  r.check('예산 소분류 해제 시 전체', ctx.applyBudgetDrillToList(ctx.getFilteredTransactions()).length, 3);
+
+  // 두 드릴다운은 마지막에 고른 것 하나만 남는다
+  ctx.setDrilldown('주거');
+  ctx.setBudgetDrilldown('식비');
+  r.check('예산 소분류 진입 시 지출 분석 드릴다운 해제', evalIn(ctx, 'drilldownMain'), null);
+  ctx.setDrilldown('주거');
+  r.check('지출 분석 드릴다운 진입 시 예산 소분류 해제', evalIn(ctx, 'budgetDrillMain'), null);
 }
 
 r.done();

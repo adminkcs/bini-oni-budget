@@ -889,14 +889,24 @@ function sortLogSheetByDate() {
 
 /**
  * ==============================================================================
- * ★ [PERF] 스케줄 정렬 (매시간)
+ * ★ [PERF] 스케줄 정렬 (하루 1회, 새벽 SORT_HOUR시)
  * 저장/수정마다 시트를 전체 정렬하면 행 수에 비례해 느려져 저장 경로에서 제거했다.
- * 대신 1시간에 한 번 정렬해 시트를 직접 볼 때의 가독성을 유지한다.
- * 사용자 저장과 겹치지 않도록 락을 잡고, 잡히지 않으면 다음 시간에 다시 시도한다.
- * (매시간 실행이라 성공 로그는 남기지 않는다. 실행로그가 이 건으로 가득 차지 않게.)
+ * 트리거는 매시간 돌지만 SORT_HOUR시에만 실제로 정렬한다.
+ * [이유] 정적 웹(GitHub Pages)은 브라우저가 Sheets API로 '일련번호로 행을 찾은 뒤 그 행에' 수정·삭제를 쓴다.
+ *   LockService를 쓸 수 없어, 그 사이에 정렬이 행을 옮기면 다른 거래를 덮어쓸 수 있다.
+ *   그래서 아무도 쓰지 않는 새벽에만 정렬한다. (화면은 자체 정렬하므로 시트 순서와 무관)
+ * 사용자 저장과 겹치지 않도록 락을 잡고, 잡히지 않으면 다음 날 다시 시도한다.
+ * (성공 로그는 남기지 않는다. 실행로그가 이 건으로 가득 차지 않게.)
  * ==============================================================================
  */
+var SORT_HOUR = 4;
+
+function isSortHour(now) {
+  return Number(Utilities.formatDate(now || new Date(), TZ, 'H')) === SORT_HOUR;
+}
+
 function scheduledSortLogSheet() {
+  if (!isSortHour()) return;
   var lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) {
     Logger.log("[정렬] 다른 작업 실행 중이라 건너뜁니다. 다음 시간에 재시도합니다.");
@@ -1490,7 +1500,7 @@ function installTriggers() {
     { fn: 'insertRegularExpenses', hour: 0, desc: '정기 항목 자동입력 (매일 00~01시)' },
     { fn: 'makeBackup', hour: 3, desc: '스프레드시트 백업 (매일 03~04시)' },
     // [PERF] 저장 경로에서 뺀 시트 정렬을 매시간 스케줄로 대신한다
-    { fn: 'scheduledSortLogSheet', everyHours: 1, desc: '가계부_내역 정렬 (매시간)' },
+    { fn: 'scheduledSortLogSheet', everyHours: 1, desc: '가계부_내역 정렬 (매일 04시에만 실제 정렬)' },
     // 이관 대상이 없으면 백업도 락도 잡지 않고 즉시 끝나므로 매월 돌아도 부담이 없다.
     // 실제 작업은 해가 바뀐 뒤 한 번만 일어난다. (백업 03시 이후로 배치)
     { fn: 'scheduledArchiveOldTransactions', monthDay: 2, hour: 4, desc: '과거 데이터 자동 이관 (매월 2일 04~05시)' },

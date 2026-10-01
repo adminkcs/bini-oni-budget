@@ -1,5 +1,5 @@
 /**
- * 정적 웹 시험판: Sheets API batchGet 결과 → 대시보드 데이터 형태로 변환.
+ * 정적 웹: Sheets API batchGet 결과 → 대시보드 데이터 형태로 변환.
  * 서버 getDashboardData(Dashboard.js)와 같은 규칙을 따른다 (test/web-data.test.js가 동일성 검증).
  * 브라우저에서는 window.SheetsData, Node 테스트에서는 module.exports로 쓴다.
  */

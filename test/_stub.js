@@ -17,6 +17,7 @@ function loadCode(sheetTz = 'Asia/Seoul') {
       if (fmt === 'yyyy-MM-dd') return `${s.getUTCFullYear()}-${pad(s.getUTCMonth() + 1)}-${pad(s.getUTCDate())}`;
       if (fmt === 'yyyy-MM-dd HH:mm') return `${s.getUTCFullYear()}-${pad(s.getUTCMonth() + 1)}-${pad(s.getUTCDate())} ${pad(s.getUTCHours())}:${pad(s.getUTCMinutes())}`;
       if (fmt === 'u') return String(s.getUTCDay() === 0 ? 7 : s.getUTCDay());
+      if (fmt === 'H') return String(s.getUTCHours());
       throw new Error('unhandled fmt ' + fmt);
     },
     getUuid: () => 'stubuuid'
@@ -56,7 +57,8 @@ function loadCommon(opts = {}) {
   const els = opts.elements || {};
   const mkEl = (id) => ({
     id, value: els[id] !== undefined ? els[id] : '',
-    innerText: '', innerHTML: '', style: {}, className: '',
+    innerText: '', innerHTML: '', style: {}, className: '', options: [],
+    appendChild(o) { this.options.push(o); },
     addEventListener() {}, querySelectorAll: () => [], querySelector: () => null,
     classList: { add() {}, remove() {}, toggle() {}, contains: () => false }
   });
@@ -70,7 +72,8 @@ function loadCommon(opts = {}) {
     document: doc,
     window: { addEventListener() {} },
     console,
-    Set, Object, Array, Math, Number, String, Date, JSON, isNaN, parseInt, parseFloat
+    Set, Object, Array, Math, Number, String, Date, JSON, isNaN, parseInt, parseFloat,
+    Option: function (text, value) { this.text = text; this.value = value; }
   };
   ctx.window.document = doc;
   vm.createContext(ctx);

@@ -17,7 +17,6 @@
     .tab-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
     
     .fab-btn { position: fixed; right: 20px; bottom: 20px; width: 64px; height: 64px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 32px; font-weight: 200; border: none; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 500; display:flex; align-items:center; justify-content:center; }
-    input[type="month"] { width: 100%; padding: 12px; font-size: 16px; font-weight: 600; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); margin-bottom: 12px; box-sizing: border-box; }
 
     .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
     .summary-box { display: flex; flex-direction: column; gap: 4px; }
@@ -54,7 +53,8 @@
   </style>
 </head>
 <body>
-  <input type="month" id="month-filter" onchange="handleMonthChange()">
+  <div id="month-nav" class="month-nav-wrap" style="margin-bottom:12px;"></div>
+  <input type="hidden" id="month-filter">
 
   <!-- [STEP3B] 내용·비고 검색 -->
   <input type="search" id="search-input" placeholder="내용·비고 검색" oninput="handleSearchInput(this)"
@@ -187,7 +187,7 @@
           el.addEventListener('click', () => setDrilldown(el.getAttribute('data-drill'))));
       }
 
-      renderAccordion(list);
+      renderAccordion(applyBudgetDrillToList(list));
     }
 
     function renderAccordion(list) {

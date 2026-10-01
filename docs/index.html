@@ -6,7 +6,6 @@
   <link rel="icon" href="icon-192.png">
   <meta name="robots" content="noindex">
   <style>
-    .fab-btn { display: none !important; }  /* 읽기 전용 시험판 */
     #web-status { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 8000; display: flex; gap: 8px;
       align-items: center; justify-content: space-between; background: #1A1A1A; color: #fff; font-size: 13px;
       padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
@@ -14,7 +13,7 @@
       padding: 7px 12px; font-weight: 700; font-size: 13px; }
   </style>
   <script>var PERF_T0 = Date.now();</script>
-  <title>비니네 오니네 가계부 (시험판)</title>
+  <title>비니네 오니네 가계부</title>
   <style>
     :root { --bg: #F3F5F8; --surface: #FFFFFF; --surface-2: #F8F9FB; --border: #E5E8EE; --text: #1A1A1A; --text-dim: #6B7280; --accent: #0046FF; --ok: #16A55C; --danger: #D62B3F; }
     * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -28,7 +27,6 @@
     .tab-btn.active { background: var(--surface); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
     
     .fab-btn { position: fixed; right: 20px; bottom: 20px; width: 64px; height: 64px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 32px; font-weight: 200; border: none; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 500; display:flex; align-items:center; justify-content:center; }
-    input[type="month"] { width: 100%; padding: 12px; font-size: 16px; font-weight: 600; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); margin-bottom: 12px; box-sizing: border-box; }
 
     .summary-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
     .summary-box { display: flex; flex-direction: column; gap: 4px; }
@@ -65,7 +63,8 @@
   </style>
 </head>
 <body>
-  <input type="month" id="month-filter" onchange="handleMonthChange()">
+  <div id="month-nav" class="month-nav-wrap" style="margin-bottom:12px;"></div>
+  <input type="hidden" id="month-filter">
 
   <!-- [STEP3B] 내용·비고 검색 -->
   <input type="search" id="search-input" placeholder="내용·비고 검색" oninput="handleSearchInput(this)"
@@ -238,6 +237,26 @@
 
 <div id="toast"></div>
 <div id="auth-notice" style="display:none;"></div>
+<style>
+  /* 월 이동: ◀ 2026년 10월 ▶ + 월 표 (PC·모바일 공용) */
+  .month-nav-wrap { position: relative; }
+  .mnav { display: flex; align-items: center; gap: 6px; }
+  .mnav-arrow { width: 44px; height: 44px; flex: none; display: flex; align-items: center; justify-content: center; padding: 0;
+                border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2); color: var(--text); font-size: 14px; cursor: pointer; }
+  .mnav-label { flex: 1; height: 44px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
+                color: var(--text); font-size: 17px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+  .mnav-caret { font-size: 12px; color: var(--text-dim); margin-left: 6px; }
+  .mpick { position: absolute; top: calc(100% + 6px); left: 0; right: 0; min-width: 280px; z-index: 700; padding: 12px;
+           background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.14); }
+  .mpick-head { display: flex; align-items: center; justify-content: space-between; font-size: 16px; font-weight: 700; margin-bottom: 10px; }
+  .mpick-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+  .mpick-month { height: 44px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-2);
+                 color: var(--text); font-size: 15px; font-weight: 600; cursor: pointer; }
+  .mpick-month.today { border-color: var(--accent); }
+  .mpick-month.selected { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .mpick-today { width: 100%; height: 40px; margin-top: 10px; border: none; border-radius: 8px; background: transparent;
+                 color: var(--accent); font-size: 14px; font-weight: 700; cursor: pointer; }
+</style>
 <style>
   /* 권한 재승인 안내 — 로딩 오버레이(9999)·모달(10000) 아래 */
   #auth-notice { position: fixed; top: 8px; left: 8px; right: 8px; z-index: 9000; }
@@ -748,7 +767,13 @@
 
   function setBudgetDrilldown(mainCat) {
     budgetDrillMain = mainCat;
+    drilldownMain = null; // 거래내역은 마지막에 고른 분류 하나로만 거른다
     if (typeof renderView === 'function') renderView();
+  }
+
+  /** 예산 집행률에서 소분류로 들어가 있으면 거래내역을 그 대분류로만 거른다 (지출 분석 집계에는 쓰지 않음) */
+  function applyBudgetDrillToList(list) {
+    return budgetDrillMain ? list.filter(t => t.대분류 === budgetDrillMain) : list;
   }
 
   function clearBudgetDrilldown() {
@@ -820,9 +845,10 @@
     const up = diff > 0;
     const bad = invert ? up : !up;
     const color = bad ? 'var(--danger)' : 'var(--ok)';
+    // '전월 대비'는 금액 길이와 상관없이 항상 다음 줄에 둔다 (일부만 줄바꿈되는 것 방지)
     return `<span style="color:${color}; font-size:12px; font-weight:700;">` +
            `${up ? '▲' : '▼'} ${formatWon(Math.abs(diff))} (${rate.toFixed(1)}%)</span>` +
-           `<span style="color:var(--text-dim); font-size:12px;"> 전월 대비</span>`;
+           `<span style="display:block; color:var(--text-dim); font-size:12px;">전월 대비</span>`;
   }
 
   // ---------------------------------------------------------------------------
@@ -830,6 +856,7 @@
   // ---------------------------------------------------------------------------
   function setDrilldown(mainCat) {
     drilldownMain = (drilldownMain === mainCat) ? null : mainCat;
+    budgetDrillMain = null; // 거래내역은 마지막에 고른 분류 하나로만 거른다
     if (typeof renderView === 'function') renderView();
   }
 
@@ -858,19 +885,98 @@
     }, 300);
   }
 
+  /** 첫 화면은 이번 달. 숨김 month-filter에 'YYYY-MM'을 맞추고 월 이동 막대를 그린다. */
   function initDateRange() {
-    const dates = allTransactions.map(t => t.날짜).filter(Boolean).sort();
-    let targetMonth = "";
-    if (dates.length > 0) {
-      targetMonth = dates[dates.length - 1].substring(0, 7);
-    } else {
-      const now = new Date();
-      targetMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-    }
     const mf = document.getElementById('month-filter');
+    if (!mf) return;
+    mf.value = ymOf(new Date());
+    renderMonthNav();
     // 첫 로딩에서는 onDataLoaded가 마지막에 한 번 그리므로 여기서는 날짜 범위만 맞춘다
-    if (mf) { mf.value = targetMonth; handleMonthChange({ skipRender: true }); }
+    handleMonthChange({ skipRender: true });
   }
+
+  // ---------------------------------------------------------------------------
+  // 월 이동: ◀ 2026년 10월 ▶ (한 달씩) + 가운데를 누르면 연도별 12개월 표
+  //   선택값은 숨김 month-filter가 들고, 바뀌면 handleMonthChange()로 기존 흐름을 탄다.
+  // ---------------------------------------------------------------------------
+  let monthPickerOpen = false;
+  let monthPickerYear = null;
+
+  function ymOf(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+
+  function currentYm() {
+    const mf = document.getElementById('month-filter');
+    return (mf && mf.value) || ymOf(new Date());
+  }
+
+  function monthNavHtml() {
+    const ym = currentYm();
+    const y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7));
+    let html = `<div class="mnav">
+        <button type="button" class="mnav-arrow" aria-label="이전 달" onclick="shiftMonth(-1)">◀</button>
+        <button type="button" class="mnav-label" aria-expanded="${monthPickerOpen}" onclick="toggleMonthPicker()">${y}년 ${m}월<span class="mnav-caret">▾</span></button>
+        <button type="button" class="mnav-arrow" aria-label="다음 달" onclick="shiftMonth(1)">▶</button>
+      </div>`;
+    if (!monthPickerOpen) return html;
+
+    const todayYm = ymOf(new Date());
+    const py = monthPickerYear;
+    const cells = [];
+    for (let i = 1; i <= 12; i++) {
+      const mm = String(i).padStart(2, '0');
+      const val = `${py}-${mm}`;
+      const cls = (val === ym ? ' selected' : '') + (val === todayYm ? ' today' : '');
+      cells.push(`<button type="button" class="mpick-month${cls}" onclick="pickMonth('${mm}')">${i}월</button>`);
+    }
+    return html + `<div class="mpick" role="dialog" aria-label="월 선택">
+        <div class="mpick-head">
+          <button type="button" class="mnav-arrow" aria-label="이전 해" onclick="shiftPickerYear(-1)">◀</button>
+          <span>${py}년</span>
+          <button type="button" class="mnav-arrow" aria-label="다음 해" onclick="shiftPickerYear(1)">▶</button>
+        </div>
+        <div class="mpick-grid">${cells.join('')}</div>
+        <button type="button" class="mpick-today" onclick="setMonth('${todayYm}')">이번 달로</button>
+      </div>`;
+  }
+
+  function renderMonthNav() {
+    const box = document.getElementById('month-nav');
+    if (box) box.innerHTML = monthNavHtml();
+  }
+
+  function setMonth(ym) {
+    document.getElementById('month-filter').value = ym;
+    monthPickerOpen = false;
+    renderMonthNav();
+    handleMonthChange();
+  }
+
+  function shiftMonth(delta) {
+    const ym = currentYm();
+    setMonth(ymOf(new Date(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1 + delta, 1)));
+  }
+
+  function toggleMonthPicker() {
+    monthPickerOpen = !monthPickerOpen;
+    if (monthPickerOpen) monthPickerYear = Number(currentYm().slice(0, 4));
+    renderMonthNav();
+  }
+
+  function shiftPickerYear(delta) { monthPickerYear += delta; renderMonthNav(); }
+
+  function pickMonth(mm) { setMonth(`${monthPickerYear}-${mm}`); }
+
+  // 표 바깥을 누르거나 Esc를 누르면 닫는다. 표 안 버튼은 누르는 순간 다시 그려져 떨어져 나가므로
+  // 이벤트 경로(composedPath)로 안쪽 클릭인지 판단한다.
+  document.addEventListener('click', e => {
+    if (!monthPickerOpen) return;
+    if (e.composedPath().some(n => n && n.id === 'month-nav')) return;
+    monthPickerOpen = false;
+    renderMonthNav();
+  });
+  document.addEventListener('keydown', e => {
+    if (monthPickerOpen && e.key === 'Escape') { monthPickerOpen = false; renderMonthNav(); }
+  });
 
   function handleMonthChange(opts) {
     const monthVal = document.getElementById('month-filter').value;
@@ -1245,7 +1351,7 @@
           el.addEventListener('click', () => setDrilldown(el.getAttribute('data-drill'))));
       }
 
-      renderAccordion(list);
+      renderAccordion(applyBudgetDrillToList(list));
     }
 
     function renderAccordion(list) {
@@ -1348,6 +1454,7 @@
     }
   </script>
   <script src="sheets-data.js"></script>
+  <script src="sheets-write.js"></script>
   <script src="static-adapter.js"></script>
 </body>
 </html>

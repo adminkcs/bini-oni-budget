@@ -19,7 +19,7 @@
     .fab-btn { position: fixed; right: 30px; bottom: 30px; width: 60px; height: 60px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 32px; border: none; cursor: pointer; box-shadow: var(--shadow-md); z-index: 500; }
     
     .filter-bar { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; gap: 14px; align-items: center; }
-    input[type="month"], button { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 14px; font-weight: 600; }
+    button { background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 14px; font-weight: 600; }
     .scorecards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
     .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; box-shadow: var(--shadow-sm); }
     .scorecard-number { font-size: 28px; font-weight: bold; margin: 8px 0; }
@@ -68,7 +68,8 @@
 
     <!-- [STEP3B] 월 선택 + 다중 필터 + 검색 -->
     <div class="filter-bar">
-      <input type="month" id="month-filter" onchange="handleMonthChange()">
+      <div id="month-nav" class="month-nav-wrap" style="width:260px; flex:none;"></div>
+      <input type="hidden" id="month-filter">
       <input type="hidden" id="start-date"><input type="hidden" id="end-date">
 
       <div class="ms" id="ms-대분류"></div>
@@ -289,7 +290,7 @@
 
       renderChart(expenses);
       const cmp = makeTxnDateComparator(formatDate(new Date()));
-      renderTable(filtered.slice().sort((a, b) => cmp(a.날짜, b.날짜)));
+      renderTable(applyBudgetDrillToList(filtered).slice().sort((a, b) => cmp(a.날짜, b.날짜)));
     }
 
     function isFiltered() {

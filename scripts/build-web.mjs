@@ -1,5 +1,5 @@
-// 정적 웹 시험판 빌드: Mobile.html + Common.html → docs/index.html (GitHub Pages가 docs/를 서비스)
-// Apps Script 템플릿 태그를 정적 값으로 바꾸고, 시험판 어댑터를 붙인다.
+// 정적 웹 빌드: Mobile.html + Common.html → docs/index.html (GitHub Pages가 docs/를 서비스)
+// Apps Script 템플릿 태그를 정적 값으로 바꾸고, 정적 웹 어댑터를 붙인다.
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from 'node:fs';
 
 const read = (p) => readFileSync(p, 'utf8');
@@ -20,7 +20,6 @@ const head = [
   '<link rel="icon" href="icon-192.png">',
   '<meta name="robots" content="noindex">',
   '<style>',
-  '  .fab-btn { display: none !important; }  /* 읽기 전용 시험판 */',
   '  #web-status { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 8000; display: flex; gap: 8px;',
   '    align-items: center; justify-content: space-between; background: #1A1A1A; color: #fff; font-size: 13px;',
   '    padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,.2); }',
@@ -29,12 +28,14 @@ const head = [
   '</style>'
 ].join('\n  ');
 html = html.replace('<meta charset="UTF-8">', () => '<meta charset="UTF-8">\n  ' + head);
-html = html.replace('<title>비니네 오니네 가계부 (Mobile)</title>', () => '<title>비니네 오니네 가계부 (시험판)</title>');
-html = html.replace('</body>', () => '  <script src="sheets-data.js"></script>\n  <script src="static-adapter.js"></script>\n</body>');
+html = html.replace('<title>비니네 오니네 가계부 (Mobile)</title>', () => '<title>비니네 오니네 가계부</title>');
+html = html.replace('</body>', () => '  <script src="sheets-data.js"></script>\n  <script src="sheets-write.js"></script>\n' +
+  '  <script src="static-adapter.js"></script>\n</body>');
 
 mkdirSync('docs', { recursive: true });
 writeFileSync('docs/index.html', html);
 copyFileSync('web/sheets-data.js', 'docs/sheets-data.js');
+copyFileSync('web/sheets-write.js', 'docs/sheets-write.js');
 copyFileSync('web/static-adapter.js', 'docs/static-adapter.js');
 copyFileSync('assets/icon-192.png', 'docs/icon-192.png');
 writeFileSync('docs/.nojekyll', '');
