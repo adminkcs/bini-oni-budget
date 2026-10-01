@@ -313,7 +313,8 @@
       상세: {
         서버: s, 브라우저: { origin: t.origin, t0: t.t0, dcl: t.dcl, dataDone: t.dataDone, paint: t.paint },
         '서버끝→화면시작(시계차 포함)': d(t.origin, s.end),
-        숨김시작: !!t.hiddenAtStart, 숨김전송: !!t.hiddenNow, batchGet성공: s.batchGetOk !== false
+        숨김시작: !!t.hiddenAtStart, 숨김전송: !!t.hiddenNow, batchGet성공: s.batchGetOk !== false,
+        batchGet오류: s.batchGetError || ''
       }
     };
   }

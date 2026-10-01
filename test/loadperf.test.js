@@ -19,6 +19,15 @@ console.log('=== 직접 진입 (?view=mobile) ===');
   r.check('데이터반영', rec.데이터반영, 300);
   r.check('렌더', rec.렌더, 700);
   r.check('서버끝→화면시작', rec.상세['서버끝→화면시작(시계차 포함)'], 2000);
+  r.check('batchGet 성공 시 오류 없음', rec.상세.batchGet오류, '');
+}
+
+console.log('\n=== batchGet 실패 사유 기록 ===');
+{
+  const s = Object.assign({}, server, { batchGetOk: false, batchGetError: 'Request had insufficient authentication scopes.' });
+  const rec = ctx.buildLoadPerfRecord(Object.assign({ server: s }, browser));
+  r.check('실패 표시', rec.상세.batchGet성공, false);
+  r.check('사유 전달', rec.상세.batchGet오류, 'Request had insufficient authentication scopes.');
 }
 
 console.log('\n=== 라우터 경유 ===');

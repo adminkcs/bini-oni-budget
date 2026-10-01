@@ -123,6 +123,7 @@ function getServerPerfJson() {
   const out = {
     view: p.view, start: p.start, end: end, total: total,
     auth: p.auth, dataAuth: p.dataAuth, batchGet: p.batchGet, batchGetOk: p.batchGetOk,
+    batchGetError: p.batchGetError || '',
     parse: p.parse, serialize: p.serialize, kb: p.kb, rows: p.rows,
     template: Math.max(0, total - p.auth - p.data - p.serialize),
     router: p.router
@@ -327,6 +328,7 @@ function getDashboardData(includeArchive = false) {
   } catch (e) {
     Logger.log('[getDashboardData] batchGet 실패(' + e.message + ') → 개별 조회로 폴백');
     _loadPerf.batchGetOk = false;
+    _loadPerf.batchGetError = String((e && e.message) || e).substring(0, 300);
   }
   _loadPerf.batchGet = Date.now() - tBatch;
   const tParse = Date.now();  // 폴백 시에는 시트별 개별 조회 시간도 여기에 포함된다
