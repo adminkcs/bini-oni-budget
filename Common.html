@@ -699,10 +699,11 @@
       targetMonth = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
     }
     const mf = document.getElementById('month-filter');
-    if (mf) { mf.value = targetMonth; handleMonthChange(); }
+    // 첫 로딩에서는 onDataLoaded가 마지막에 한 번 그리므로 여기서는 날짜 범위만 맞춘다
+    if (mf) { mf.value = targetMonth; handleMonthChange({ skipRender: true }); }
   }
 
-  function handleMonthChange() {
+  function handleMonthChange(opts) {
     const monthVal = document.getElementById('month-filter').value;
     if (!monthVal) return;
     drilldownMain = null; // [STEP3B] 달을 바꾸면 드릴다운은 해제한다
@@ -711,6 +712,7 @@
     const month = parseInt(monthVal.split('-')[1], 10);
     if (document.getElementById('start-date')) document.getElementById('start-date').value = `${year}-${String(month).padStart(2, '0')}-01`;
     if (document.getElementById('end-date')) document.getElementById('end-date').value = `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
+    if (opts && opts.skipRender) return;
     if (typeof renderView === 'function') renderView();
   }
 
