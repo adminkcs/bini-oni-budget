@@ -1,16 +1,20 @@
 /**
  * 정적 웹 어댑터 (GitHub Pages).
  * Mobile.html + Common.html을 그대로 쓰고, Apps Script 대신 브라우저가 Sheets API로 직접 읽고 쓴다.
- *  - 설정(OAuth 클라이언트 ID, 스프레드시트 ID)은 주소의 #cid=..&sid=.. 로 한 번 받아 브라우저에 저장한다.
- *    저장소가 공개라 ID를 코드에 넣지 않는다.
+ *  - 권한은 drive.file(사용자가 파일 선택 창에서 고른 가계부 파일 하나) + 이메일뿐이다.
+ *    다른 시트·드라이브 파일·백업본에는 접근할 수 없다.
+ *  - 로그인은 한 번: 팝업으로 받은 코드를 열쇠 교환소(token-service, 별도 Apps Script)에 보내
+ *    1시간 토큰 + 장기 열쇠를 받고, 이후엔 장기 열쇠로 화면 뒤에서 자동 갱신한다.
+ *  - 설정은 주소의 #cid=..&ex=..&key=..&app=..&sid=.. 로 한 번 받아 브라우저에 저장한다(저장소 공개라 코드에 넣지 않음).
  *  - 마지막으로 받은 데이터를 저장해 두었다가 다음 접속 때 먼저 그린다.
  *  - 화면의 google.script.run 호출(저장·수정·삭제)을 Sheets API 쓰기로 바꿔 연결한다.
  */
 (function () {
-  var SCOPE = 'https://www.googleapis.com/auth/spreadsheets https://www.googleapis.com/auth/userinfo.email';
-  var NEED_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
-  var KEY_CFG = 'bob.cfg', KEY_TOKEN = 'bob.token', KEY_SNAPSHOT = 'bob.snapshot', KEY_EMAIL = 'bob.email';
+  var SCOPE = 'https://www.googleapis.com/auth/drive.file openid email';
+  var NEED_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+  var KEY_CFG = 'bob.cfg', KEY_TOKEN = 'bob.token', KEY_RT = 'bob.rt', KEY_SNAPSHOT = 'bob.snapshot', KEY_EMAIL = 'bob.email';
   var SHEETS = 'https://sheets.googleapis.com/v4/spreadsheets/';
+  var CFG_KEYS = ['cid', 'ex', 'key', 'app', 'sid'];
   var t = { nav: (performance.timeOrigin || Date.now()) };
   var cfg = null;
 
@@ -21,11 +25,15 @@
 
   function readConfigFromHash() {
     var h = new URLSearchParams(location.hash.slice(1));
-    if (h.get('cid') && h.get('sid')) {
-      save(KEY_CFG, { cid: h.get('cid'), sid: h.get('sid') });
-      history.replaceState(null, '', location.pathname + location.search); // 주소창에서 ID를 지운다
+    if (h.get('cid') && h.get('ex')) {
+      var next = load(KEY_CFG) || {};
+      if (next.cid && next.cid !== h.get('cid')) [KEY_TOKEN, KEY_RT].forEach(drop); // 다른 앱 설정이면 예전 열쇠는 버린다
+      CFG_KEYS.forEach(function (k) { if (h.get(k)) next[k] = h.get(k); });
+      save(KEY_CFG, next);
+      history.replaceState(null, '', location.pathname + location.search); // 주소창에서 설정값을 지운다
     }
-    return load(KEY_CFG);
+    var c = load(KEY_CFG);
+    return c && c.cid && c.ex ? c : null;
   }
 
   // ---------- 상태 표시줄 ----------
@@ -41,6 +49,11 @@
     if (action) document.getElementById('web-status-btn').onclick = action.onClick;
   }
 
+  function hideStatus() {
+    var el = document.getElementById('web-status');
+    if (el) el.remove();
+  }
+
   function ago(ms) {
     var m = Math.round(ms / 60000);
     if (m < 1) return '방금';
@@ -49,77 +62,139 @@
     return h < 24 ? h + '시간 전' : Math.round(h / 24) + '일 전';
   }
 
-  // ---------- Google 로그인(토큰) ----------
-  var gisLoaded = null;
-  function loadGis() {
-    if (gisLoaded) return gisLoaded;
-    gisLoaded = new Promise(function (resolve, reject) {
+  // ---------- 외부 스크립트 ----------
+  var scripts = {};
+  function loadScript(src) {
+    if (scripts[src]) return scripts[src];
+    scripts[src] = new Promise(function (resolve, reject) {
       var s = document.createElement('script');
-      s.src = 'https://accounts.google.com/gsi/client';
+      s.src = src;
       s.async = true;
-      s.onload = function () { installScriptRun(); resolve(); };
-      s.onerror = function () { reject(new Error('Google 로그인 스크립트를 불러오지 못했습니다.')); };
+      s.onload = function () { installScriptRun(); resolve(); }; // Google 스크립트가 window.google을 덮어써도 연결을 다시 건다
+      s.onerror = function () { delete scripts[src]; reject(new Error('Google 스크립트를 불러오지 못했습니다.')); };
       document.head.appendChild(s);
     });
-    return gisLoaded;
+    return scripts[src];
   }
 
-  /** 쓰기 권한까지 받은 토큰만 쓴다 (예전 읽기 전용 토큰이면 다시 로그인) */
+  // ---------- Google 로그인(토큰) ----------
+  function reloginError(msg) {
+    drop(KEY_TOKEN);
+    return Object.assign(new Error(msg || '로그인이 필요합니다.'), { relogin: true });
+  }
+
   function cachedToken() {
     var tk = load(KEY_TOKEN);
     if (!tk || tk.exp - Date.now() <= 60000) return null;
-    if (String(tk.scope || '').split(' ').indexOf(NEED_SCOPE) === -1) return null;
+    if (String(tk.scope || '').split(' ').indexOf(NEED_SCOPE) === -1) return null; // 예전 넓은 권한 토큰은 쓰지 않는다
     return tk.value;
   }
 
-  function requestToken() {
-    return loadGis().then(function () {
+  /** 열쇠 교환소 호출. text/plain으로 보내 브라우저 사전 확인(preflight) 없이 Apps Script로 간다 */
+  function exchange(body) {
+    return fetch(cfg.ex, { method: 'POST', body: JSON.stringify(body) })
+      .then(function (res) { return res.json(); })
+      .then(function (j) {
+        if (!j || j.error || !j.access_token) {
+          var err = new Error(j && j.error === 'not_allowed' ? '허용되지 않은 Google 계정입니다.' : '로그인 처리에 실패했습니다(' + ((j && j.error) || '응답 없음') + ').');
+          err.code = j && j.error;
+          throw err;
+        }
+        save(KEY_TOKEN, { value: j.access_token, scope: j.scope, exp: Date.now() + (Number(j.expires_in) || 3600) * 1000 });
+        if (j.refresh_token) save(KEY_RT, j.refresh_token);
+        if (j.email) save(KEY_EMAIL, j.email);
+        return j.access_token;
+      });
+  }
+
+  /** 처음 한 번: 팝업 로그인 → 코드 → 교환소에서 토큰 + 장기 열쇠 */
+  function codeLogin() {
+    return loadScript('https://accounts.google.com/gsi/client').then(function () {
       return new Promise(function (resolve, reject) {
-        var client = google.accounts.oauth2.initTokenClient({
+        google.accounts.oauth2.initCodeClient({
           client_id: cfg.cid,
           scope: SCOPE,
+          ux_mode: 'popup',
+          prompt: 'consent', // 장기 열쇠를 확실히 받기 위해 동의 화면을 보여 준다
           callback: function (resp) {
-            if (resp.error) { reject(new Error(resp.error_description || resp.error)); return; }
+            if (resp.error || !resp.code) { reject(new Error(resp.error_description || resp.error || '로그인이 취소되었습니다.')); return; }
             if (String(resp.scope || '').split(' ').indexOf(NEED_SCOPE) === -1) {
-              reject(new Error('Google 스프레드시트 권한을 허용해야 사용할 수 있습니다.')); return;
+              reject(new Error('가계부 파일 접근 권한을 허용해야 사용할 수 있습니다.')); return;
             }
-            save(KEY_TOKEN, { value: resp.access_token, scope: resp.scope,
-                              exp: Date.now() + (Number(resp.expires_in) || 3600) * 1000 });
-            resolve(resp.access_token);
+            exchange({ action: 'code', code: resp.code }).then(resolve, reject);
           },
           error_callback: function (err) { reject(new Error((err && err.message) || '로그인이 취소되었습니다.')); }
-        });
-        client.requestAccessToken({ prompt: '' });
+        }).requestCode();
       });
     });
   }
 
-  function reloginError() { drop(KEY_TOKEN); return Object.assign(new Error('로그인이 만료되었습니다.'), { relogin: true }); }
-
-  function api(path, opts) {
+  /** 유효한 토큰. 만료됐으면 장기 열쇠로 화면 뒤에서 갱신하고, 그것도 안 되면 interactive일 때만 로그인 창을 띄운다 */
+  var refreshing = null;
+  function accessToken(interactive) {
     var tk = cachedToken();
-    if (!tk) return Promise.reject(reloginError());
-    var o = Object.assign({}, opts || {});
-    o.headers = Object.assign({ Authorization: 'Bearer ' + tk }, o.body ? { 'Content-Type': 'application/json' } : {});
-    return fetch(path, o).then(function (res) {
+    if (tk) return Promise.resolve(tk);
+    var rt = load(KEY_RT);
+    var silent = rt ? (refreshing = refreshing || exchange({ action: 'refresh', refresh_token: rt })
+      .finally(function () { refreshing = null; })) : Promise.reject(reloginError());
+    return silent.catch(function (e) {
+      if (e.code === 'invalid_grant' || e.code === 'not_allowed') drop(KEY_RT); // 끊긴 열쇠는 버린다
+      if (interactive) return codeLogin();
+      throw e.relogin ? e : reloginError();
+    });
+  }
+
+  function api(path, opts, retried) {
+    return accessToken(false).then(function (tk) {
+      var o = Object.assign({}, opts || {});
+      o.headers = Object.assign({ Authorization: 'Bearer ' + tk }, o.body ? { 'Content-Type': 'application/json' } : {});
+      return fetch(path, o);
+    }).then(function (res) {
+      if (res.status === 401 && !retried) { drop(KEY_TOKEN); return api(path, opts, true); } // 토큰만 만료: 한 번 갱신 후 재시도
       if (res.status === 401) throw reloginError();
+      if (res.status === 403 || res.status === 404) throw Object.assign(new Error('가계부 파일을 선택해 주세요.'), { needFile: true });
       if (!res.ok) return res.text().then(function (b) { throw new Error('Google 시트 요청 실패(' + res.status + '): ' + b.slice(0, 200)); });
       return res.json();
     });
   }
 
-  /** 입력자 기록용 이메일. 한 번 받아 저장해 둔다 */
-  function userEmail() {
-    var e = load(KEY_EMAIL);
-    if (e) return Promise.resolve(e);
-    return api('https://www.googleapis.com/oauth2/v3/userinfo').then(function (u) {
-      if (u && u.email) save(KEY_EMAIL, u.email);
-      return (u && u.email) || 'UNKNOWN';
+  /** 입력자 기록용 이메일 (로그인 때 교환소가 알려 준 값) */
+  function userEmail() { return Promise.resolve(load(KEY_EMAIL) || 'UNKNOWN'); }
+
+  // ---------- 가계부 파일 선택 (drive.file 권한은 사용자가 고른 파일에만 생긴다) ----------
+  function pickFile() {
+    if (!cfg.key || !cfg.app) return Promise.reject(new Error('파일 선택 설정(key, app)이 없습니다. 첫 접속 주소를 다시 열어 주세요.'));
+    return Promise.all([accessToken(false), loadScript('https://apis.google.com/js/api.js')]).then(function (r) {
+      var token = r[0];
+      return new Promise(function (resolve, reject) {
+        gapi.load('picker', function () {
+          var view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS).setMode(google.picker.DocsViewMode.LIST);
+          if (cfg.sid && typeof view.setFileIds === 'function') view.setFileIds(cfg.sid);
+          new google.picker.PickerBuilder()
+            .addView(view)
+            .setLocale('ko')
+            .setOAuthToken(token)
+            .setDeveloperKey(cfg.key)
+            .setAppId(cfg.app)
+            .setTitle('가계부 파일(우리집가계부)을 선택하세요')
+            .setCallback(function (d) {
+              if (d.action === google.picker.Action.PICKED && d.docs && d.docs[0]) {
+                cfg.sid = d.docs[0].id;
+                save(KEY_CFG, cfg);
+                resolve(cfg.sid);
+              } else if (d.action === google.picker.Action.CANCEL) {
+                reject(new Error('가계부 파일을 선택해야 사용할 수 있습니다.'));
+              }
+            })
+            .build().setVisible(true);
+        });
+      });
     });
   }
 
   // ---------- Sheets 읽기 ----------
   function fetchSheets() {
+    if (!cfg.sid) return Promise.reject(Object.assign(new Error('가계부 파일을 선택해 주세요.'), { needFile: true }));
     var params = new URLSearchParams({ valueRenderOption: 'UNFORMATTED_VALUE', dateTimeRenderOption: 'SERIAL_NUMBER' });
     SheetsData.RANGES.forEach(function (r) { params.append('ranges', r); });
     return api(SHEETS + encodeURIComponent(cfg.sid) + '/values:batchGet?' + params).then(function (json) {
@@ -206,7 +281,7 @@
               if (onOk) onOk(res);
             }).catch(function (e) {
               if (e.relogin) promptLogin();
-              if (onFail) onFail({ message: e.relogin ? '로그인이 만료되었습니다. 하단에서 다시 로그인한 뒤 저장해 주세요.' : e.message });
+              if (onFail) onFail({ message: e.relogin ? '로그인이 필요합니다. 하단에서 로그인한 뒤 다시 저장해 주세요.' : e.message });
             });
           };
         }
@@ -234,13 +309,27 @@
     status((prefix || '') + '최신 데이터를 보고 저장하려면 로그인하세요.', { label: 'Google 로그인', onClick: function () { refresh(true); } });
   }
 
+  /** 파일 권한이 없으면(처음 로그인 직후 등) 파일 선택 창을 띄운 뒤 다시 읽는다 */
+  function fetchWithFile() {
+    return fetchSheets().catch(function (e) {
+      if (!e.needFile) throw e;
+      status('가계부 파일(우리집가계부)을 선택해 주세요.');
+      var overlay = document.getElementById('loading-overlay');
+      var wasShown = overlay.style.display !== 'none';
+      overlay.style.display = 'none'; // 불러오는 중 가림막이 선택 창을 덮지 않게 한다
+      return pickFile().then(function () {
+        if (wasShown) overlay.style.display = 'flex';
+        return fetchSheets();
+      });
+    });
+  }
+
   function refresh(interactive) {
     var started = Date.now();
-    var getToken = cachedToken() ? Promise.resolve() : interactive ? requestToken() : Promise.reject(reloginError());
     status('최신 데이터 불러오는 중…');
-    return getToken.then(function () {
+    return accessToken(interactive).then(function () {
       t.token = Date.now();
-      return fetchSheets();
+      return fetchWithFile();
     }).then(function (data) {
       t.fetched = Date.now();
       save(KEY_SNAPSHOT, { at: Date.now(), data: data });
@@ -248,22 +337,15 @@
       t.fresh = Date.now();
       console.log('[웹 계측]', JSON.stringify({ 저장본표시: t.cached ? t.cached - t.nav : null, 토큰: t.token - started,
         시트읽기: t.fetched - t.token, 최신표시: t.fresh - t.nav }));
-      status('최신 데이터 · 시트 읽기 ' + ((t.fetched - t.token) / 1000).toFixed(1) + '초', { label: '로그아웃', onClick: logout });
-      userEmail().catch(function () {});
+      hideStatus(); // 정상일 때는 하단 줄을 띄우지 않는다 (로그인 필요·오류 때만 표시)
     }).catch(function (err) {
       var snap = load(KEY_SNAPSHOT);
       var base = snap ? ago(Date.now() - snap.at) + ' 저장본 표시 중 · ' : '';
       if (err.relogin) promptLogin(base);
+      else if (err.needFile) status(base + err.message, { label: '파일 선택', onClick: function () { pickFile().then(function () { refresh(true); }, function (e) { status(e.message); }); } });
       else status(base + err.message, { label: '다시 시도', onClick: function () { refresh(true); } });
       if (!snap) document.getElementById('loading-overlay').style.display = 'none';
     });
-  }
-
-  function logout() {
-    var tk = load(KEY_TOKEN);
-    [KEY_TOKEN, KEY_SNAPSHOT, KEY_EMAIL].forEach(drop);
-    try { if (tk && window.google && google.accounts) google.accounts.oauth2.revoke(tk.value, function () {}); } catch (e) {}
-    location.reload();
   }
 
   function start() {
@@ -271,7 +353,7 @@
     cfg = readConfigFromHash();
     if (!cfg) {
       document.getElementById('loading-overlay').style.display = 'none';
-      status('설정이 없습니다. 안내받은 첫 접속 주소(#cid=…&sid=…)로 한 번 열어 주세요.');
+      status('설정이 없습니다. 안내받은 첫 접속 주소로 한 번 열어 주세요.');
       return;
     }
     var snap = load(KEY_SNAPSHOT);

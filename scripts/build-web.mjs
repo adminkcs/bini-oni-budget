@@ -22,8 +22,7 @@ const head = [
   '<style>',
   '  #web-status { position: fixed; left: 8px; right: 8px; bottom: 8px; z-index: 8000; display: flex; gap: 8px;',
   '    align-items: center; justify-content: space-between; background: #1A1A1A; color: #fff; font-size: 13px;',
-  '    padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,.2); }',
-  '  #web-status button { flex: none; background: #0046FF; color: #fff; border: none; border-radius: 8px;',
+  '    padding: 10px 12px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,.2); }',  '  #web-status button { flex: none; background: #0046FF; color: #fff; border: none; border-radius: 8px;',
   '    padding: 7px 12px; font-weight: 700; font-size: 13px; }',
   '</style>'
 ].join('\n  ');
@@ -37,6 +36,7 @@ writeFileSync('docs/index.html', html);
 copyFileSync('web/sheets-data.js', 'docs/sheets-data.js');
 copyFileSync('web/sheets-write.js', 'docs/sheets-write.js');
 copyFileSync('web/static-adapter.js', 'docs/static-adapter.js');
+copyFileSync('web/privacy.html', 'docs/privacy.html');
 copyFileSync('assets/icon-192.png', 'docs/icon-192.png');
 writeFileSync('docs/.nojekyll', '');
 console.log('docs/ 빌드 완료 (' + Math.round(html.length / 1024) + 'KB)');

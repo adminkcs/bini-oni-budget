@@ -16,3 +16,4 @@ scripts/**
 assets/**
 web/**
 docs/**
+token-service/**
