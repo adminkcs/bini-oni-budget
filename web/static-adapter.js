@@ -168,8 +168,8 @@
       var token = r[0];
       return new Promise(function (resolve, reject) {
         gapi.load('picker', function () {
+          // setFileIds로 한 파일만 거르면 목록이 비어 나와서 전체 시트 목록을 보여 준다
           var view = new google.picker.DocsView(google.picker.ViewId.SPREADSHEETS).setMode(google.picker.DocsViewMode.LIST);
-          if (cfg.sid && typeof view.setFileIds === 'function') view.setFileIds(cfg.sid);
           new google.picker.PickerBuilder()
             .addView(view)
             .setLocale('ko')
