@@ -181,6 +181,22 @@ function logPageLoad(m) {
   }
 }
 
+/**
+ * 재승인 안내 정보. Apps Script가 승인 필요(REQUIRED)로 판단하면 승인 URL을 준다.
+ * URL을 얻지 못하면 url=null — 화면이 '연결 관리에서 삭제 후 다시 열기' 수동 절차를 안내한다.
+ * 이름 끝의 _ 로 google.script.run에서 호출되지 않게 한다.
+ */
+function buildAuthNotice_() {
+  let url = null;
+  try {
+    const info = ScriptApp.getAuthorizationInfo(ScriptApp.AuthMode.FULL);
+    if (info.getAuthorizationStatus() === ScriptApp.AuthorizationStatus.REQUIRED) url = info.getAuthorizationUrl();
+  } catch (e) {
+    Logger.log('[재승인 안내] 승인 상태 확인 실패: ' + (e && e.message ? e.message : e));
+  }
+  return { url: url };
+}
+
 function doGet(e) {
   _loadPerf.start = Date.now();
   try {
@@ -329,6 +345,8 @@ function getDashboardData(includeArchive = false) {
     Logger.log('[getDashboardData] batchGet 실패(' + e.message + ') → 개별 조회로 폴백');
     _loadPerf.batchGetOk = false;
     _loadPerf.batchGetError = String((e && e.message) || e).substring(0, 300);
+    // 접속자 계정에 스프레드시트 승인 범위가 빠져 있으면 화면에 재승인 안내를 띄운다
+    if (isPermissionError(_loadPerf.batchGetError)) result._authNotice = buildAuthNotice_();
   }
   _loadPerf.batchGet = Date.now() - tBatch;
   const tParse = Date.now();  // 폴백 시에는 시트별 개별 조회 시간도 여기에 포함된다

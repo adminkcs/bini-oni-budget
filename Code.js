@@ -143,6 +143,11 @@ function isBlankCell(v) {
   return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
 }
 
+/** 접속자 계정의 OAuth 승인 범위가 부족해 난 오류인지 (재승인 안내 판단용) */
+function isPermissionError(msg) {
+  return /권한|permission|insufficient|scope/i.test(String(msg || ''));
+}
+
 /**
  * ==============================================================================
  * ★ 공통 헬퍼: 금액 부호 통일 (지출은 음수, 수입은 양수)

@@ -108,6 +108,17 @@
 </style>
 
 <div id="toast"></div>
+<div id="auth-notice" style="display:none;"></div>
+<style>
+  /* 권한 재승인 안내 — 로딩 오버레이(9999)·모달(10000) 아래 */
+  #auth-notice { position: fixed; top: 8px; left: 8px; right: 8px; z-index: 9000; }
+  .auth-card { max-width: 560px; margin: 0 auto; background: #FFF7E6; border: 1px solid #E8890C; border-radius: 12px;
+               padding: 14px 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.12); color: #1A1A1A; font-size: 14px; line-height: 1.5; }
+  .auth-title { font-weight: 800; margin-bottom: 4px; }
+  .auth-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .auth-btn { background: #E8890C; color: #fff; text-decoration: none; font-weight: 700; padding: 8px 14px; border-radius: 8px; }
+  .auth-close { background: transparent; border: 1px solid #E8890C; color: #1A1A1A; font-weight: 600; padding: 8px 14px; border-radius: 8px; cursor: pointer; }
+</style>
 
 <script>
   let rawData = {};
@@ -268,7 +279,35 @@
     document.getElementById('loading-overlay').style.display = 'none';
     if(document.getElementById('updated-at')) document.getElementById('updated-at').innerText = '최근 갱신: ' + new Date().toLocaleTimeString('ko-KR');
     if (typeof renderView === 'function') renderView();
-    if (firstLoad) reportLoadPerf();
+    if (firstLoad) { renderAuthNotice(data._authNotice); reportLoadPerf(); }
+  }
+
+  // ---------------------------------------------------------------------------
+  // 권한 재승인 안내: 접속자 계정에 스프레드시트 승인 범위가 빠져 서버가 느린 경로로 읽을 때 표시
+  // ---------------------------------------------------------------------------
+  const ACCOUNT_CONNECTIONS_URL = 'https://myaccount.google.com/connections';
+
+  function authNoticeHtml(notice) {
+    if (!notice) return '';
+    const url = (typeof notice.url === 'string' && /^https:\/\/[^\s"'<>]+$/.test(notice.url)) ? notice.url : '';
+    const action = url
+      ? `<a class="auth-btn" href="${escapeHtml(url)}" target="_blank" rel="noopener">권한 다시 승인하기</a>`
+      : `<a class="auth-btn" href="${ACCOUNT_CONNECTIONS_URL}" target="_blank" rel="noopener">Google 계정 연결 관리 열기</a>`;
+    const how = url
+      ? '버튼을 눌러 모든 항목을 허용한 뒤, 가계부를 다시 열어 주세요.'
+      : '목록에서 이 가계부 앱의 액세스를 삭제한 뒤 가계부를 다시 열고, 권한 화면에서 모든 항목을 허용해 주세요.';
+    return `<div class="auth-card" role="alert">
+        <div class="auth-title">권한 재승인이 필요합니다</div>
+        <div>이 계정에 Google 스프레드시트 권한 일부가 빠져 있어 데이터를 느린 방식으로 불러오고 있습니다(3~5초 더 걸림). ${how}</div>
+        <div class="auth-actions">${action}<button type="button" class="auth-close" onclick="renderAuthNotice(null)">닫기</button></div>
+      </div>`;
+  }
+
+  function renderAuthNotice(notice) {
+    const box = document.getElementById('auth-notice');
+    if (!box) return;
+    box.innerHTML = authNoticeHtml(notice);
+    box.style.display = notice ? 'block' : 'none';
   }
 
   // ---------------------------------------------------------------------------
