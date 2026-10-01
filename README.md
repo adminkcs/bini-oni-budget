@@ -438,21 +438,52 @@ Apps Script 감싸기(배너 + 약 1~5초)를 없앤 가족용 주 사용 화면
   그래서 시트 정렬(`scheduledSortLogSheet`)은 **새벽 4시에만** 실제로 돈다(`SORT_HOUR`).
   과거 데이터 이관도 매월 2일 04~05시라 사용 시간과 겹치지 않는다.
 
-### 최초 설정 (관리자 1회)
+### 구성 (2026-10-02 B안 배포 기준)
 
-1. **GitHub Pages 켜기:** 저장소 Settings → Pages → Source `Deploy from a branch` → Branch `main` / 폴더 `/docs` → Save.
-   주소: `https://adminkcs.github.io/bini-oni-budget/`
-2. **Google Cloud 프로젝트** ([console.cloud.google.com](https://console.cloud.google.com), 관리자 계정)
-   - 새 프로젝트 생성 → API 및 서비스 → 라이브러리 → **Google Sheets API 사용 설정**
-   - Google 인증 플랫폼(OAuth 동의 화면) → 대상: 외부 / 상태: **테스트** → 테스트 사용자에 **가족 계정 이메일 추가**
-   - 클라이언트 → 클라이언트 만들기 → 유형 **웹 애플리케이션** →
-     승인된 JavaScript 원본: `https://adminkcs.github.io` → 만들기 → **클라이언트 ID 복사**
-   - 기존 "Apps Script" 클라이언트(Apps Script 앱이 자동 생성)는 운영 앱 것이므로 건드리지 않고 **별도로 만든다.**
-   - B안부터는 **웹 로그인 전용 프로젝트**를 따로 둔다(동의 화면 프로덕션 게시, 권한 `drive.file`·`email`·`openid`,
-     Sheets API·Google Picker API 사용 설정, 웹 클라이언트 + 웹사이트 제한 API 키).
-3. **첫 접속 주소:** `https://adminkcs.github.io/bini-oni-budget/#cid=<클라이언트 ID>&ex=<교환소 URL>&key=<API 키>&app=<프로젝트 번호>&sid=<스프레드시트 ID>`
-   - 처음 한 번 이 주소로 열면 값들이 그 브라우저에 저장되고 주소창에서는 지워진다.
-   - 두 ID는 저장소(공개)에 넣지 않는다. 가족에게는 이 주소를 메신저로 따로 전달한다.
+| 구성 요소 | 어디에 있나 |
+|---|---|
+| 웹 화면 | GitHub Pages `https://adminkcs.github.io/bini-oni-budget/` (저장소 Settings → Pages: `main` / `/docs`) |
+| 웹 로그인용 Google Cloud 프로젝트 | **`bini-oni-web`** (관리자 계정). 동의 화면 앱 이름 "비니네 오니네 가계부", 대상 외부, **프로덕션** |
+| 운영 Apps Script용 Google Cloud 프로젝트 | `bini-oni-budget` — 운영 Apps Script가 묶여 있어 **웹 설정 때문에 건드리지 않는다** (동의 화면은 테스트 상태 유지) |
+| 열쇠 교환소 | 별도 Apps Script 프로젝트 "가계부 열쇠 교환소". 스크립트 ID는 `token-service/.clasp.json`(관리자 PC에만 있음, 저장소 제외) 또는 Apps Script 홈 목록에서 확인, 편집기는 `https://script.google.com/d/<scriptId>/edit` |
+| 개인정보처리방침 | `web/privacy.html` → `docs/privacy.html` (동의 화면 브랜딩에 등록됨) |
+
+### 설정값 위치와 변경 방법
+
+**값 자체는 이 문서에 적지 않는다(공개 저장소).** 필요한 값은 아래 위치에서 직접 확인한다.
+Google Cloud 화면은 항상 상단 프로젝트 선택이 **`bini-oni-web`**인지 먼저 확인한다.
+
+| 설정 | 확인·변경 위치 | 바꾼 뒤 할 일 |
+|---|---|---|
+| 클라이언트 ID (`cid`) | Cloud → Google 인증 플랫폼 → 클라이언트 → **"가계부 웹 (B안)"** | 교환소 `CLIENT_ID` 교체 + **새 첫 접속 주소를 모든 기기에서 한 번 열기**(cid가 바뀌면 기기의 열쇠는 버려지고 다시 로그인) |
+| 클라이언트 보안 비밀번호 | 같은 클라이언트 화면 오른쪽 "클라이언트 보안 비밀번호" → **Add secret** (기존 값은 다시 볼 수 없음) | 교환소 `CLIENT_SECRET` 교체 → 정상 로그인 확인 후 옛 비밀번호 사용 중지·삭제. 웹·주소는 그대로 |
+| 승인된 JavaScript 원본 | 같은 클라이언트 화면 | 지금은 `https://adminkcs.github.io`, `http://localhost:5179`(로컬 시험용). 리디렉션 URI는 쓰지 않음(팝업 방식) |
+| API 키 (`key`) | Cloud → API 및 서비스 → 사용자 인증 정보 → **"가계부 파일 선택기"** | 제한 유지: API는 Google Picker API만, 웹사이트는 `https://adminkcs.github.io/*`, `http://localhost:5179/*`. 키를 새로 만들면 새 첫 접속 주소 |
+| 프로젝트 번호 (`app`) | Cloud 대시보드 → 프로젝트 정보 (클라이언트 ID 앞의 숫자와 같음) | 프로젝트를 바꿀 때만 바뀜 |
+| 교환소 URL (`ex`) | `token-service/`에서 `npx clasp deployments` → "열쇠 교환소" 배포 ID → `https://script.google.com/macros/s/<배포ID>/exec` | 코드 수정 시 `npx clasp push -f` → `npx clasp deploy -i <배포ID> -d "설명"` 으로 **같은 배포를 갱신**해 주소 유지. 새 배포를 만들면 주소가 바뀌어 새 첫 접속 주소 필요 |
+| 교환소 스크립트 속성 | 교환소 편집기 → ⚙️ 프로젝트 설정 → 스크립트 속성: `CLIENT_ID`, `CLIENT_SECRET`, `ALLOWED_EMAILS`(JSON 배열), `RECENT_LOG`(자동 기록, 고치지 않음) | 저장 즉시 적용. 바꾼 뒤 편집기에서 `checkSetup` 실행 → "설정됨 / 설정됨 / N개" 확인 |
+| 허용 가족 계정 | 위 `ALLOWED_EMAILS`. 예: `["a@gmail.com","b@gmail.com"]` | 추가한 계정은 가계부 시트도 공유받아야 파일 선택 창에 보인다. 뺀 계정은 다음 자동 갱신(최대 1시간) 때 거절 |
+| 스프레드시트 ID (`sid`) | 가계부 시트 주소 `.../spreadsheets/d/<ID>/edit`의 `<ID>` | 선택 사항. 없어도 파일 선택 창에서 고르면 된다(선택 창은 ID로 거르지 않고 전체 목록을 보여 줌) |
+| 동의 화면 범위 | Cloud → Google 인증 플랫폼 → 데이터 액세스: `drive.file`, `userinfo.email`, `openid` (모두 비민감 → 검수 불필요) | 범위를 바꾸면 `web/static-adapter.js`의 `SCOPE`·`NEED_SCOPE`와 교환소 `ALLOWED_SCOPES`도 함께 바꾼다. 민감 범위를 넣으면 Google 검수 대상이 된다 |
+| 동의 화면 브랜딩 | Google 인증 플랫폼 → 브랜딩: 홈페이지, 개인정보처리방침(`/privacy.html`), 승인된 도메인 `adminkcs.github.io`. **로고는 넣지 않는다**(넣으면 검수 대상) | — |
+
+**첫 접속 주소 형식** (값을 채워 가족에게 메신저로 따로 전달):
+`https://adminkcs.github.io/bini-oni-budget/#cid=<클라이언트 ID>&ex=<교환소 URL>&key=<API 키>&app=<프로젝트 번호>&sid=<스프레드시트 ID>`
+- 기기마다 **평소 쓰는 브라우저로 한 번** 연다(메신저 안 브라우저로 열면 그 안에만 저장된다). 값은 브라우저에 저장되고 주소창에서는 지워진다.
+- 그 뒤로는 기본 주소나 홈 화면 아이콘으로 연다. `ex`가 없는 예전 주소는 설정으로 인정되지 않는다.
+
+**교환소 기록 보기:** 교환소 편집기에서 `showRecentLog` 실행 → 최근 30건(최신순, `시각 로그인|갱신 성공|거절(사유) | 계정`).
+토큰·코드·비밀번호는 기록하지 않는다. 웹 앱 실행 화면에는 기록 문구가 보이지 않아 스크립트 속성에 따로 보관한다.
+Sheets API 요청·오류 수는 Cloud → API 및 서비스 → Google Sheets API → 측정항목에서 본다
+(파일을 고르기 전 첫 읽기는 404가 정상이다 — 권한이 없으면 404를 받고 선택 창을 띄우는 흐름).
+
+**유출이 의심될 때:**
+- 클라이언트 보안 비밀번호 → 새 비밀번호 추가 → 교환소 교체 → 옛 비밀번호 삭제.
+- 기기 분실·장기 열쇠 유출 → 그 계정의 Google 계정 → 보안 → 서드 파티 연결에서 "비니네 오니네 가계부" 해제(즉시 무효). 영향 범위는 가계부 파일 하나다.
+- API 키 → 새 키 만들기(같은 제한) → 새 첫 접속 주소 → 옛 키 삭제.
+
+**배포 시 주의:** GitHub Pages는 파일을 10분간 캐시한다. `build:web`이 스크립트 주소에 내용 기반 `?v=`를 붙이므로
+스크립트는 바로 바뀌지만, `index.html` 자체는 최대 10분 늦게 반영될 수 있다(급하면 휴대폰 브라우저를 완전히 닫았다 연다).
 
 ### 사용과 한계
 - 처음 한 번 하단의 **Google 로그인**을 누르고(팝업은 사용자가 눌러야만 띄울 수 있다), 이어 뜨는 파일 선택 창에서
@@ -462,7 +493,7 @@ Apps Script 감싸기(배너 + 약 1~5초)를 없앤 가족용 주 사용 화면
 - 마지막으로 받은 데이터를 그 기기 브라우저에 저장한다. 저장 성공 뒤에는 저장본을 조용히 다시 받아 둔다.
   (가족 개인 폰 전용이라 로그아웃 버튼은 두지 않는다. 지우려면 브라우저의 사이트 데이터 삭제)
 - 하단 줄은 로그인 필요·오류·저장본 확인 중일 때만 나오고, 최신 데이터를 받으면 사라진다.
-- 테스트 상태의 OAuth 앱은 승인이 일정 기간 뒤 만료될 수 있다 [확인 필요 — 며칠 사용하며 확인].
+- 웹 로그인 프로젝트(`bini-oni-web`) 동의 화면이 프로덕션이라 장기 열쇠가 7일로 끊기지 않는다 [며칠 사용하며 확인 중].
 - 속도는 브라우저 콘솔의 `[웹 계측]`(저장본 표시·토큰·시트 읽기·최신 표시 ms)으로 본다.
 
 ### 실측 기록 — 2026-10-01 (관리자 계정, 폰 크롬, 읽기 전용 1단계)
