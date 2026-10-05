@@ -940,6 +940,7 @@ function onOpen() {
     .addItem('예산 시트 만들기', 'ensureBudgetSheet')           // [STEP3B]
     .addItem('예산 지난달 값 수동 복사', 'copyBudgetToNewMonth') // [STEP3B]
     .addItem('스크립트 속성 점검', 'setupScriptProperties')      // 민감값을 코드에서 뺀 뒤 상태 확인용
+    .addItem('지금 백업', 'backupNow')                          // 트리거 백업 실패 시 수동 실행 + 권한 재승인
     .addSeparator()
     .addItem('삭제 대기 행 정리', 'purgeDeletedRows')          // [STEP3] 소프트 삭제 정리
     .addItem('트리거 설치/재설치', 'installTriggers')          // [STEP3] 배포 재현성
@@ -1592,12 +1593,39 @@ function makeBackup() {
     if (isFirstDayOfMonth) { file.makeCopy("[월간백업] " + baseName + "_" + dateStr, folder); made++; }
 
     var trashed = cleanUpOldBackups(folder, baseName); // [STEP3] 이 문서의 백업만 정리하도록 이름 전달
-    logRun("makeBackup", "성공", made, "생성 " + made + "건 / 정리 " + trashed + "건");
+    var okMsg = "생성 " + made + "건 / 정리 " + trashed + "건";
+    logRun("makeBackup", "성공", made, okMsg);
+    return { ok: true, message: okMsg };
 
   } catch (e) {
     // [STEP3] 백업이 며칠째 실패해도 모르던 문제 방지
-    logRun("makeBackup", "실패", made, e && e.message ? e.message : String(e));
+    var errMsg = e && e.message ? e.message : String(e);
+    logRun("makeBackup", "실패", made, errMsg);
     notifyFailure("makeBackup", e);
+    return { ok: false, message: errMsg };
+  }
+}
+
+/**
+ * [가계부 도구 > 지금 백업] 메뉴. makeBackup을 바로 실행하고 결과를 알림창으로 보여 준다.
+ * [권한] Google의 세분화된 동의 화면에서 일부 항목(Drive 등)만 허용된 상태면, 편집기에서 실행해도
+ *   승인 창이 다시 뜨지 않고 "권한이 없습니다"로만 실패한다(2026-10-02~05 트리거 백업 실패 사례).
+ *   requireAllScopes가 빠진 권한이 있으면 실행을 멈추고 승인 창을 띄운다 — 모든 항목을 허용하면 된다.
+ *   트리거에서는 승인 창을 띄울 수 없으므로 makeBackup 자체에는 넣지 않는다.
+ */
+function backupNow() {
+  var ui = null;
+  try { ui = SpreadsheetApp.getUi(); } catch (e) { ui = null; }
+  if (typeof ScriptApp.requireAllScopes === 'function') {
+    ScriptApp.requireAllScopes(ScriptApp.AuthMode.FULL);
+  }
+  var result = makeBackup();
+  if (ui) {
+    ui.alert(result.ok ? "백업 완료" : "백업 실패",
+             result.ok ? result.message
+                       : result.message + "\n\n권한 오류가 계속되면 Google 계정 > 보안 > 서드파티 연결에서 " +
+                         "이 스크립트의 액세스를 삭제한 뒤 다시 실행하고, 권한 화면에서 모든 항목을 허용하세요.",
+             ui.ButtonSet.OK);
   }
 }
 

@@ -176,6 +176,7 @@ JSON은 주석을 지원하지 않으므로 여기에 기록한다.
 | 정기 항목 수동 실행 | `insertRegularExpenses` | 트리거와 동일. 멱등성이 있어 중복 입력되지 않음 |
 | 중복 일련번호 검사 | `checkAndFixDuplicateUUIDs` | 두 시트 교차 중복까지 검사·수정 |
 | 분류 설정 점검 | `validateCategorySheet` | 서로 다른 대분류에 중복된 소분류 탐지 |
+| 지금 백업 | `backupNow` | 백업 즉시 실행 + 결과 알림. Drive 권한이 빠져 있으면 승인 창을 다시 띄운다 |
 | 삭제 대기 행 정리 | `purgeDeletedRows` | 30일 지난 소프트 삭제 행을 실제 제거 |
 | 트리거 설치/재설치 | `installTriggers` | 시간 기반 트리거를 코드로 재생성 |
 | [1회성] 감사 컬럼 추가 | `migrateAddAuditColumns` | I~L 컬럼 생성 (멱등) |
