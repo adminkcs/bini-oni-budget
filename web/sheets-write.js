@@ -39,6 +39,16 @@
     };
   }
 
+  /**
+   * 글자 그대로 쓰기 (서버 asText와 같은 규칙). USER_ENTERED는 "3/4"→날짜, "50%"→0.5, "=…"→수식,
+   * 숫자만 있는 일련번호→숫자로 바꾸므로 글자 칸 앞에 작은따옴표를 붙인다. 따옴표는 셀 값에 남지 않는다.
+   */
+  function asText(v) {
+    if (v === null || v === undefined) return v;
+    var s = String(v);
+    return s === '' ? s : "'" + s;
+  }
+
   /** 서버 generateUniqueUuid와 같은 형식(12자리 16진수) */
   function newId() {
     var hex = (root.crypto && root.crypto.randomUUID) ? root.crypto.randomUUID() : String(Math.random()) + Date.now();
@@ -55,13 +65,14 @@
   /** 새 행 A~L (일련번호 … 비고, 입력자, 입력시각, 수정시각, 삭제여부). 날짜·시각은 USER_ENTERED로 날짜 값이 된다 */
   function newRow(entry, id, actor, now) {
     var c = clean(entry);
-    return [id, entry.날짜, c.main, c.sub, c.content, c.amount, c.payment, c.note, actor || 'UNKNOWN', stamp(now), '', ''];
+    return [asText(id), entry.날짜, asText(c.main), asText(c.sub), asText(c.content), c.amount, asText(c.payment), asText(c.note),
+            actor || 'UNKNOWN', stamp(now), '', ''];
   }
 
   /** 수정 A~H. 입력자/입력시각(I/J)은 보존하고 수정시각(K)은 따로 쓴다 */
   function updateRow(entry) {
     var c = clean(entry);
-    return [entry.일련번호, entry.날짜, c.main, c.sub, c.content, c.amount, c.payment, c.note];
+    return [asText(entry.일련번호), entry.날짜, asText(c.main), asText(c.sub), asText(c.content), c.amount, asText(c.payment), asText(c.note)];
   }
 
   /** 서버 toClientTxn과 같은 모양 */
@@ -79,7 +90,7 @@
   }
 
   var api = { SHEET_LOG: SHEET_LOG, SHEET_INCOME: SHEET_INCOME, DELETED_FLAG: DELETED_FLAG, sheetOf: sheetOf,
-              validate: validate, normalizeAmount: normalizeAmount, newId: newId, stamp: stamp,
+              validate: validate, normalizeAmount: normalizeAmount, asText: asText, newId: newId, stamp: stamp,
               newRow: newRow, updateRow: updateRow, clientTxn: clientTxn, findRows: findRows };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.SheetsWrite = api;

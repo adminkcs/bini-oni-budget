@@ -21,7 +21,14 @@ const row = ctx.buildTxnRow({
   actor: 'user@example.com', at: at
 });
 r.check('행 길이', row.length, 12);
-r.check('일련번호', row[ctx.COL.ID - 1], 'abc12345');
+r.check('일련번호(글자 그대로 쓰기 표시)', row[ctx.COL.ID - 1], "'abc12345");
+r.check('내용도 글자 그대로', row[ctx.COL.CONTENT - 1], "'점심");
+r.check('빈 비고는 따옴표 없이 빈 칸', ctx.buildTxnRow({ id: 'a', note: '' })[ctx.COL.NOTE - 1], '');
+
+console.log('\n=== asText: 시트가 재해석하는 값 ===');
+['3/4', '50%', '=SUM(A1)', '012345678901', '123456789e12', '1,000'].forEach(v =>
+  r.check(`"${v}" → 따옴표 접두`, ctx.asText(v), "'" + v));
+r.check('null 유지', ctx.asText(null), null);
 r.check('날짜(시트 TZ 자정)', ctx.Utilities.formatDate(row[ctx.COL.DATE - 1], 'Asia/Seoul', 'yyyy-MM-dd HH:mm'), '2026-09-11 00:00');
 r.check('금액 음수 유지', row[ctx.COL.AMOUNT - 1], -10000);
 r.check('입력자', row[ctx.COL.CREATED_BY - 1], 'user@example.com');

@@ -567,7 +567,8 @@ function updateTransaction(entry) {
     if (!dateObj) return { ok: false, message: '날짜를 해석할 수 없습니다.' };
 
     // A~H만 덮어쓴다. 입력자/입력시각(I/J)은 보존해야 하므로 범위에 포함하지 않는다.
-    const row = [entry.일련번호, dateObj, mainCat, subCat, content, finalAmount, payment, note];
+    // 글자 칸은 asText로 감싸 시트가 날짜·숫자·수식으로 해석하지 않게 한다
+    const row = [asText(entry.일련번호), dateObj, asText(mainCat), asText(subCat), asText(content), finalAmount, asText(payment), asText(note)];
     sheet.getRange(targetRow, 1, 1, row.length).setValues([row]);
     sheet.getRange(targetRow, COL.DATE).setNumberFormat('yyyy-MM-dd'); // [STEP2] 표시형식 유지
     touchUpdatedAt(sheet, targetRow); // [STEP3] 수정시각만 갱신

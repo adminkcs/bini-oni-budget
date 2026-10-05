@@ -57,14 +57,21 @@ console.log('\n=== 저장: 행 값과 반환값 ===');
   const { ctx, writes } = server();
   const res = ctx.saveTransaction(good);
   const srvRow = writes[0].values[0];
-  const webRow = W.newRow(good, srvRow[0], 'me@example.com', new Date());
-  r.check('서버 일련번호 형식(12자리)', /^[0-9a-f]{12}$/.test(srvRow[0]), true);
+  const srvId = String(srvRow[0]).replace(/^'/, '');
+  const webRow = W.newRow(good, srvId, 'me@example.com', new Date());
+  r.check('서버 일련번호는 글자 그대로 쓰기 표시', String(srvRow[0]).charAt(0), "'");
+  r.check('서버 일련번호 형식(12자리)', /^[0-9a-f]{12}$/.test(srvId), true);
   r.check('웹 일련번호 형식(12자리)', /^[0-9a-f]{12}$/.test(W.newId()), true);
   const pick = row => JSON.stringify([row[0], row[2], row[3], row[4], row[5], row[6], row[7], row[8], row[10], row[11]]);
   r.check('A·C~I·K·L 값 동일(날짜·입력시각 제외)', pick(webRow), pick(srvRow));
   r.check('날짜는 문자열로 넣어 시트가 날짜로 변환', webRow[1], '2026-10-01');
   r.check('행 길이 12(A~L)', webRow.length, srvRow.length);
   r.check('반환값 동일', JSON.stringify({ ok: true, txn: W.clientTxn(good, res.txn.일련번호) }), JSON.stringify(res));
+  r.check('화면에 돌려주는 값에는 따옴표 없음', res.txn.내용 + '|' + res.txn.일련번호, '점심|' + srvId);
+  const risky = Object.assign({}, good, { 내용: '3/4', 비고: '=1+1' });
+  r.check('웹: 날짜·수식처럼 보이는 내용도 글자 그대로',
+          JSON.stringify(W.newRow(risky, '012345678901', 'a', new Date()).filter((_, i) => [0, 4, 7].includes(i))),
+          JSON.stringify(["'012345678901", "'3/4", "'=1+1"]));
   const inc = Object.assign({}, good, { 구분: '수입', 금액: 500 });
   r.check('수입은 양수(서버와 동일)', W.clientTxn(inc, 'x').금액, server().ctx.saveTransaction(inc).txn.금액);
   r.check('수입 시트 선택', W.sheetOf('수입'), '수입');

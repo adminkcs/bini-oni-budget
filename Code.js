@@ -37,6 +37,11 @@ var TXN_HEADERS = [
   "입력자", "입력시각", "수정시각", "삭제여부"
 ];
 var TXN_COL_COUNT = TXN_HEADERS.length; // 12
+
+/** 거래 시트에서 다룰 열 수: A~L(감사 컬럼 마이그레이션 전이면 그보다 적음). 오른쪽 헬퍼 열은 제외 */
+function txnWidth(sheet) {
+  return Math.min(sheet.getLastColumn(), TXN_COL_COUNT);
+}
 var SYSTEM_ACTOR = "SYSTEM";            // 정기 자동입력의 입력자 표기
 var DELETED_FLAG = "Y";
 var PURGE_AFTER_DAYS = 30;              // 소프트 삭제 행의 실제 정리 유예 기간
@@ -229,17 +234,29 @@ function getActor() {
   }
 }
 
-/** 감사 컬럼까지 채운 거래 행 배열을 만든다 (길이 TXN_COL_COUNT) */
+/**
+ * 시트에 '글자 그대로' 쓰기 위한 표시. 앞에 작은따옴표(')를 붙이면 시트가 값을 해석하지 않는다.
+ * setValues / USER_ENTERED는 입력값을 사람이 친 것처럼 해석해 "3/4"→날짜, "50%"→0.5,
+ * "=…"→수식, 숫자만 있는 일련번호→숫자(앞 0 소실)로 바꾼다. 따옴표 자체는 셀 값에 남지 않는다.
+ * 빈 값은 그대로 둔다(따옴표만 든 셀이 생기지 않게). web/sheets-write.js의 asText와 같은 규칙.
+ */
+function asText(v) {
+  if (v === null || v === undefined) return v;
+  var s = String(v);
+  return s === '' ? s : "'" + s;
+}
+
+/** 감사 컬럼까지 채운 거래 행 배열을 만든다 (길이 TXN_COL_COUNT). 글자 칸은 asText로 감싼다 */
 function buildTxnRow(opts) {
   var row = new Array(TXN_COL_COUNT).fill("");
-  row[COL.ID - 1] = opts.id;
+  row[COL.ID - 1] = asText(opts.id);
   row[COL.DATE - 1] = opts.date;
-  row[COL.MAIN - 1] = opts.main;
-  row[COL.SUB - 1] = opts.sub;
-  row[COL.CONTENT - 1] = opts.content;
+  row[COL.MAIN - 1] = asText(opts.main);
+  row[COL.SUB - 1] = asText(opts.sub);
+  row[COL.CONTENT - 1] = asText(opts.content);
   row[COL.AMOUNT - 1] = opts.amount;
-  row[COL.PAYMENT - 1] = opts.payment;
-  row[COL.NOTE - 1] = opts.note;
+  row[COL.PAYMENT - 1] = asText(opts.payment);
+  row[COL.NOTE - 1] = asText(opts.note);
   row[COL.CREATED_BY - 1] = opts.actor;
   row[COL.CREATED_AT - 1] = opts.at || new Date();
   row[COL.UPDATED_AT - 1] = "";
@@ -283,8 +300,12 @@ function logRun(functionName, result, count, message) {
   }
 }
 
-/** 관리자 이메일 (Script Property ADMIN_EMAIL 우선, 없으면 ALLOWED_USERS 첫 번째) */
-function getAdminEmail() {
+/**
+ * 관리자 이메일 (Script Property ADMIN_EMAIL 우선, 없으면 ALLOWED_USERS 첫 번째)
+ * [보안] 이름 끝 _ : 웹앱(ANYONE) 접근 차단 페이지에서도 google.script.run으로 부를 수 있어
+ *   스크립트 속성 값이 새지 않도록 비공개 함수로 둔다. getBackupFolderId_도 같은 이유.
+ */
+function getAdminEmail_() {
   try {
     var props = PropertiesService.getScriptProperties();
     var direct = props.getProperty('ADMIN_EMAIL');
@@ -298,7 +319,7 @@ function getAdminEmail() {
 
 /** 트리거 실패를 메일로 알린다. 알림 실패가 본 작업을 막지 않도록 예외를 삼킨다. */
 function notifyFailure(functionName, err) {
-  var to = getAdminEmail();
+  var to = getAdminEmail_();
   Logger.log("[실패] " + functionName + " : " + (err && err.message ? err.message : err));
   if (!to) return;
   try {
@@ -399,16 +420,9 @@ function getRegularSortWeight(targetSetting, today) {
  *   - 신규 형식: 비고 "정기지출 자동입력#<정기항목ID>" -> "날짜|ID" 키
  *   - 구 형식:   비고 "정기지출 자동입력" (ID 없음)    -> "날짜|~내용" 키로 보완
  *     (형식 변경 직후 첫 실행에서 기존 입력분이 중복되지 않게 하는 하위호환 처리)
+ *   - 월 건수:   "@yyyy-MM|ID" -> 그 달에 들어간 건수 (지정일 변경 후 재입력 방지)
+ * 일간·월간 실행 모두 '이번 달 전체' 범위로 한 번에 모은다(시트 읽기 1회).
  * ==============================================================================
- */
-function buildRegularDoneKeys(sheet, todayStr) {
-  return buildRegularDoneKeysInRange(sheet, todayStr, todayStr);
-}
-
-/**
- * [신규] buildRegularDoneKeys의 범위 버전. 월간 일괄 등록(insertRegularExpensesForMonth)이
- * 하루치가 아니라 한 달치 멱등성 키를 한 번의 시트 읽기로 모아야 해서 분리했다.
- * fromStr === toStr === todayStr로 호출하면 기존 buildRegularDoneKeys와 동일하게 동작한다.
  */
 function buildRegularDoneKeysInRange(sheet, fromStr, toStr) {
   var keys = {};
@@ -419,17 +433,69 @@ function buildRegularDoneKeysInRange(sheet, fromStr, toStr) {
   var values = sheet.getRange(2, 1, lastRow - 1, 8).getValues();
   for (var i = 0; i < values.length; i++) {
     var note = String(values[i][7] || "");
-    if (note.indexOf(NOTE_PREFIX_EXPENSE) !== 0 && note.indexOf(NOTE_PREFIX_INCOME) !== 0) continue;
+    // 화면에서 비고에 메모를 덧붙여도 표시는 남으므로 '포함'으로 판정한다
+    if (note.indexOf(NOTE_PREFIX_EXPENSE) === -1 && note.indexOf(NOTE_PREFIX_INCOME) === -1) continue;
     var dStr = fmtDate(values[i][1]);
     if (dStr < fromStr || dStr > toStr) continue;
 
-    var hashPos = note.indexOf("#");
-    if (hashPos !== -1) {
-      keys[dStr + "|" + note.substring(hashPos + 1).trim()] = true;
+    var regId = regularIdFromNote(note);
+    if (regId) {
+      keys[dStr + "|" + regId] = true;
+      // 같은 달에 이 항목이 이미 몇 건 들어갔는지 (지정일을 월 중간에 바꿔도 중복되지 않게)
+      var mk = monthCountKey(dStr, regId);
+      keys[mk] = (keys[mk] || 0) + 1;
     }
     keys[dStr + "|~" + String(values[i][4] || "").trim()] = true;
   }
   return keys;
+}
+
+/** 비고 "정기지출 자동입력#<ID> 메모…"에서 정기항목 ID만 꺼낸다 (# 뒤 공백 전까지) */
+function regularIdFromNote(note) {
+  var m = String(note || "").match(/#(\S+)/);
+  return m ? m[1] : "";
+}
+
+/** 월별 건수 키. '@'로 시작해 날짜 키("yyyy-MM-dd|…")와 섞이지 않는다 */
+function monthCountKey(dateStr, regId) {
+  return "@" + String(dateStr).substring(0, 7) + "|" + regId;
+}
+
+/**
+ * 일자 지정 항목(요일 지정 제외)이 그 달에 실행되는 날 수. 요일 지정이면 null(월 건수 판정 안 함).
+ * 예: "15" → 1, "5, 15, 25" → 3, "말일" → 1, 2월의 "30, 31" → 1(둘 다 말일로 보정)
+ */
+function scheduledDaysInMonth(targetSetting, lastDayOfMonth) {
+  if (String(targetSetting === null || targetSetting === undefined ? "" : targetSetting).indexOf("요일") !== -1) return null;
+  var n = 0;
+  for (var d = 1; d <= lastDayOfMonth; d++) {
+    if (matchesRegularSchedule(targetSetting, { day: d, lastDayOfMonth: lastDayOfMonth, fullDay: "" })) n++;
+  }
+  return n;
+}
+
+/**
+ * 이 항목을 오늘(dateStr) 넣으면 중복인가. 일간·월간 실행이 같은 규칙을 쓴다.
+ *  ① 같은 날짜에 같은 ID(또는 ID 없는 항목은 같은 이름)가 이미 있으면 중복
+ *  ② 일자 지정 항목은 그 달에 들어간 건수가 이미 실행 날 수 이상이면 중복
+ *     (1일 일괄 등록 후 지정일을 15→20으로 바꿔도 20일에 또 넣지 않는다)
+ */
+function isRegularDone(keys, dateStr, regId, itemName, targetSetting, lastDayOfMonth) {
+  if (regId && keys[dateStr + "|" + regId]) return true;
+  if (keys[dateStr + "|~" + String(itemName || "").trim()]) return true;
+  if (!regId) return false;
+  var limit = scheduledDaysInMonth(targetSetting, lastDayOfMonth);
+  return limit !== null && (keys[monthCountKey(dateStr, regId)] || 0) >= limit;
+}
+
+/** 이번 실행에서 넣은 항목을 키에 반영한다 (같은 실행 안의 중복 차단) */
+function markRegularDone(keys, dateStr, regId, itemName) {
+  if (regId) {
+    keys[dateStr + "|" + regId] = true;
+    var mk = monthCountKey(dateStr, regId);
+    keys[mk] = (keys[mk] || 0) + 1;
+  }
+  keys[dateStr + "|~" + String(itemName || "").trim()] = true;
 }
 
 /**
@@ -494,8 +560,11 @@ function insertRegularExpenses() {
       if (sc && !catMap[sc]) catMap[sc] = mc;
     }
 
-    var doneExpense = buildRegularDoneKeys(logSheet, today.dateStr);
-    var doneIncome = buildRegularDoneKeys(incomeSheet, today.dateStr);
+    // 이번 달 전체 범위로 키를 모은다(시트 읽기 횟수는 같음). 월 건수 판정에 필요하다.
+    var ym = today.year + "-" + String(today.month).padStart(2, "0");
+    var monthTo = ym + "-" + String(today.lastDayOfMonth).padStart(2, "0");
+    var doneExpense = buildRegularDoneKeysInRange(logSheet, ym + "-01", monthTo);
+    var doneIncome = buildRegularDoneKeysInRange(incomeSheet, ym + "-01", monthTo);
 
     var regData = regularSheet.getDataRange().getValues();
     var expRows = [], incRows = [];
@@ -520,12 +589,10 @@ function insertRegularExpenses() {
         continue;
       }
 
-      // 멱등성 검사
+      // 멱등성 검사 (같은 날 같은 항목 / 이번 달 실행 횟수 초과)
       var keys = isIncome ? doneIncome : doneExpense;
-      var idKey = today.dateStr + "|" + regId;
-      var nameKey = today.dateStr + "|~" + String(itemName || "").trim();
-      if ((regId && keys[idKey]) || keys[nameKey]) {
-        Logger.log("[건너뜀] 오늘 이미 입력된 정기 항목: " + itemName);
+      if (isRegularDone(keys, today.dateStr, regId, itemName, targetSetting, today.lastDayOfMonth)) {
+        Logger.log("[건너뜀] 이미 입력된 정기 항목: " + itemName);
         skippedDup++;
         continue;
       }
@@ -551,12 +618,12 @@ function insertRegularExpenses() {
       if (isIncome) incRows.push(newRow); else expRows.push(newRow);
 
       // 같은 실행 안에서의 중복도 차단
-      if (regId) keys[idKey] = true;
-      keys[nameKey] = true;
+      markRegularDone(keys, today.dateStr, regId, itemName);
     }
 
     var added = appendRowsSafely(logSheet, expRows) + appendRowsSafely(incomeSheet, incRows);
-    if (expRows.length > 0) sortLogSheetByDate();
+    // 시트 정렬은 여기서 하지 않는다. 정적 웹은 잠금 없이 '행 찾기→쓰기'를 하므로
+    // 낮·자정에 행 순서가 바뀌면 다른 거래를 덮어쓸 수 있다. 정렬은 04시 scheduledSortLogSheet만 한다.
 
     SpreadsheetApp.flush();
     sortRegularSheet(regularSheet);
@@ -649,11 +716,9 @@ function insertRegularExpensesForMonth() {
           continue;
         }
 
-        // 멱등성 검사 (insertRegularExpenses와 동일한 키 규칙)
+        // 멱등성 검사 (insertRegularExpenses와 동일한 규칙)
         var keys = isIncome ? doneIncome : doneExpense;
-        var idKey = dateStr + "|" + regId;
-        var nameKey = dateStr + "|~" + String(itemName || "").trim();
-        if ((regId && keys[idKey]) || keys[nameKey]) {
+        if (isRegularDone(keys, dateStr, regId, itemName, targetSetting, today.lastDayOfMonth)) {
           skippedDup++;
           continue;
         }
@@ -678,13 +743,13 @@ function insertRegularExpensesForMonth() {
         if (isIncome) incRows.push(newRow); else expRows.push(newRow);
 
         // 같은 실행 안에서의 중복도 차단 (다른 날짜의 동일 항목과는 키가 다르므로 섞이지 않음)
-        if (regId) keys[idKey] = true;
-        keys[nameKey] = true;
+        markRegularDone(keys, dateStr, regId, itemName);
       }
     }
 
     var added = appendRowsSafely(logSheet, expRows) + appendRowsSafely(incomeSheet, incRows);
-    if (expRows.length > 0) sortLogSheetByDate();
+    // 시트 정렬은 여기서 하지 않는다. 정적 웹은 잠금 없이 '행 찾기→쓰기'를 하므로
+    // 낮·자정에 행 순서가 바뀌면 다른 거래를 덮어쓸 수 있다. 정렬은 04시 scheduledSortLogSheet만 한다.
 
     SpreadsheetApp.flush();
     sortRegularSheet(regularSheet);
@@ -862,7 +927,7 @@ function onEdit(e) {
       while (existingIds.has(newUuid)) {
         newUuid = Utilities.getUuid().substring(0, 8);
       }
-      currentIds[r2][0] = newUuid;
+      currentIds[r2][0] = asText(newUuid); // 숫자만 있는 ID가 숫자로 바뀌지 않게
       existingIds.add(newUuid);
       hasUpdates = true;
     }
@@ -883,7 +948,9 @@ function sortLogSheetByDate() {
   if (!logSheet) return;
   var lastRow = logSheet.getLastRow();
   if (lastRow <= 1) return;
-  logSheet.getRange(2, 1, lastRow - 1, logSheet.getLastColumn())
+  // 거래 열(A~L)만 정렬한다. 그 오른쪽의 분류 유효성 헬퍼 열(M2의 ARRAYFORMULA)은 행 위치 기준
+  // 수식이라 함께 옮기면 안 된다(수식 셀이 다른 행으로 이동). 헬퍼 결과는 정렬 후 자동 재계산된다.
+  logSheet.getRange(2, 1, lastRow - 1, Math.min(logSheet.getLastColumn(), TXN_COL_COUNT))
     .sort([{ column: 2, ascending: false }, { column: 1, ascending: true }]);
 }
 
@@ -1547,7 +1614,7 @@ function installTriggers() {
  *   속성이 없으면 조용히 하드코딩된 폴더를 쓰는 대신 명확히 실패시킨다.
  *   (설정 누락을 숨기지 않는 편이 낫다. 호출부가 실행로그와 메일로 알린다)
  */
-function getBackupFolderId() {
+function getBackupFolderId_() {
   var folderId = PropertiesService.getScriptProperties().getProperty('BACKUP_FOLDER_ID');
   if (!folderId) {
     throw new Error("BACKUP_FOLDER_ID 스크립트 속성이 설정되지 않았습니다. " +
@@ -1557,7 +1624,7 @@ function getBackupFolderId() {
 }
 
 function makeArchiveBackup() {
-  var folderId = getBackupFolderId();
+  var folderId = getBackupFolderId_();
   try {
     var folder = DriveApp.getFolderById(folderId);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -1577,7 +1644,7 @@ function makeArchiveBackup() {
 function makeBackup() {
   var made = 0;
   try {
-    var folderId = getBackupFolderId();
+    var folderId = getBackupFolderId_();
     var folder = DriveApp.getFolderById(folderId);
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var file = DriveApp.getFileById(ss.getId());
@@ -1694,7 +1761,7 @@ function checkAndFixDuplicateUUIDs() {
         while (seen[newUuid]) {
           newUuid = Utilities.getUuid().substring(0, 8);
         }
-        sheet.getRange(i + 1, 1).setValue(newUuid);
+        sheet.getRange(i + 1, 1).setValue(asText(newUuid));
         seen[newUuid] = true; 
         changedCount++;
         Logger.log("[" + sName + "] 중복 UUID 수정됨: " + id + " -> " + newUuid);
@@ -1774,7 +1841,7 @@ function archiveCore() {
 
   function yearOf(dateVal) {
     if (dateVal instanceof Date) return dateVal.getFullYear();
-    return parseInt(String(dateVal).split("-")[0], 10);
+    return parseInt(String(dateVal).replace(/^'/, "").split("-")[0], 10); // asText로 감싼 글자 날짜 대비
   }
 
   // [트리거 대응] 이관 대상이 하나도 없으면 백업도 락도 잡지 않고 바로 끝낸다.
@@ -1811,7 +1878,8 @@ function archiveCore() {
       var checkSheet = ss.getSheetByName(sheetNames[s]);
       if (!checkSheet || checkSheet.getLastRow() <= 1) continue;
 
-      var formulas = checkSheet.getDataRange().getFormulas();
+      // 거래 열(A~L)만 검사한다. 오른쪽 분류 유효성 헬퍼 열의 ARRAYFORMULA는 이관 대상이 아니라 제외.
+      var formulas = checkSheet.getRange(1, 1, checkSheet.getLastRow(), txnWidth(checkSheet)).getFormulas();
       for (var r = 0; r < formulas.length; r++) {
         for (var c = 0; c < formulas[r].length; c++) {
           if (formulas[r][c] !== '') {
@@ -1833,13 +1901,21 @@ function archiveCore() {
       var sheet = ss.getSheetByName(sheetName);
       if (!sheet || sheet.getLastRow() <= 1) continue;
 
-      var data = sheet.getDataRange().getValues();
+      // 거래 열(A~L)만 읽고 쓴다. 헬퍼 열 수식은 건드리지 않는다.
+      var width = txnWidth(sheet);
+      var lastRow = sheet.getLastRow();
+      // 다시 쓸 때 시트가 글자를 날짜·숫자로 재해석하지 않도록 글자 칸은 asText로 감싼다
+      // (예: 숫자만 있는 일련번호 "0123…"이 숫자로 바뀌어 앞 0이 사라지는 것 방지)
+      var data = sheet.getRange(1, 1, lastRow, width).getValues().map(function (r) {
+        return r.map(function (v) { return typeof v === 'string' ? asText(v) : v; });
+      });
       var headers = data[0];
       var keepData = [headers];
       var archiveData = [headers];
 
       for (var i = 1; i < data.length; i++) {
         var row = data[i];
+        if (row.every(isBlankCell)) continue; // 헬퍼 열 때문에 딸려 온 빈 행은 버린다(위로 당겨 씀)
         var y = yearOf(row[COL.DATE - 1]);
         if (!isNaN(y) && y < thresholdYear) archiveData.push(row);
         else keepData.push(row);
@@ -1870,10 +1946,10 @@ function archiveCore() {
           throw new Error("[" + sheetName + "] 보관함 쓰기 검증 실패. 원본을 유지합니다.");
         }
 
-        // 롤백 불가 구간
-        sheet.clearContents();
-        sheet.getRange(1, 1, keepData.length, keepData[0].length).setValues(keepData);
-        ensureTxnColumnFormats(sheet); // 서식 재적용 (clearContents 이후)
+        // 롤백 불가 구간 — 머리글과 헬퍼 열은 그대로 두고 거래 열(A~L)의 데이터 행만 비운 뒤 다시 쓴다
+        sheet.getRange(2, 1, lastRow - 1, width).clearContent();
+        if (keepData.length > 1) sheet.getRange(2, 1, keepData.length - 1, width).setValues(keepData.slice(1));
+        ensureTxnColumnFormats(sheet); // 서식 재적용
 
         archivedCount += archiveData.length - 1;
         processedSheets.push(sheetName);
@@ -1965,7 +2041,7 @@ function scheduledArchiveOldTransactions() {
          result.archived, result.message);
 
   // 실제로 데이터를 옮겼거나 문제가 생긴 경우에만 메일로 알린다
-  var to = getAdminEmail();
+  var to = getAdminEmail_();
   if (!to) return;
   var subject = result.status === 'done' ? '[가계부] 과거 데이터 자동 이관 완료'
               : result.status === 'error' ? '[가계부] 과거 데이터 자동 이관 실패 — 확인 필요'

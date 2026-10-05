@@ -210,7 +210,7 @@
 
         accHtml += `
           <div class="acc-group" data-date="${escapeHtml(d)}">
-            <div class="acc-header" onclick="toggleAcc('${d}')">
+            <div class="acc-header" onclick="toggleAcc(this.parentElement.getAttribute('data-date'))">
               <div><span class="acc-date">${formatDateLabel(d)}</span><span class="acc-count">${rows.length}건</span></div>
               <div class="acc-total" style="${colorClass}">${formatWon(daySum)} <span class="acc-icon" style="font-size:12px; margin-left:4px;">${icon}</span></div>
             </div>

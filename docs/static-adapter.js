@@ -281,7 +281,7 @@
               if (onOk) onOk(res);
             }).catch(function (e) {
               if (e.relogin) promptLogin();
-              if (onFail) onFail({ message: e.relogin ? '로그인이 필요합니다. 하단에서 로그인한 뒤 다시 저장해 주세요.' : e.message });
+              if (onFail) onFail({ message: e.relogin ? '로그인이 필요합니다. 하단에서 로그인한 뒤 다시 저장해 주세요.' : e.message, relogin: !!e.relogin });
             });
           };
         }
@@ -335,6 +335,7 @@
       save(KEY_SNAPSHOT, { at: Date.now(), data: data });
       render(data);
       t.fresh = Date.now();
+      lastFresh = Date.now();
       console.log('[웹 계측]', JSON.stringify({ 저장본표시: t.cached ? t.cached - t.nav : null, 토큰: t.token - started,
         시트읽기: t.fetched - t.token, 최신표시: t.fresh - t.nav }));
       hideStatus(); // 정상일 때는 하단 줄을 띄우지 않는다 (로그인 필요·오류 때만 표시)
@@ -347,6 +348,19 @@
       if (!snap) document.getElementById('loading-overlay').style.display = 'none';
     });
   }
+
+  /**
+   * 휴대폰은 탭을 며칠씩 열어 두므로, 30분 넘게 지난 뒤 화면으로 돌아오면 조용히 최신 데이터를 다시 읽는다
+   * (가족이 넣은 내역이 안 보이던 문제). 입력 창이 열려 있으면 입력을 방해하지 않도록 건너뛴다.
+   */
+  var lastFresh = 0, STALE_MS = 30 * 60 * 1000;
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState !== 'visible' || !cfg || !lastFresh || Date.now() - lastFresh < STALE_MS) return;
+    var modal = document.getElementById('register-modal');
+    if (modal && modal.classList.contains('open')) return;
+    lastFresh = Date.now(); // 실패해도 연달아 다시 시도하지 않게
+    refresh(false);
+  });
 
   function start() {
     installScriptRun();

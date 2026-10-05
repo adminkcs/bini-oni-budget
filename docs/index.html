@@ -1016,6 +1016,95 @@
   function formatDateLabel(dateStr) { return (!dateStr || dateStr === '-') ? '-' : dateStr.replace(/-/g, '.') + '.'; }
   function formatWon(n) { return (n === null || isNaN(n)) ? '-' : (n < 0 ? '-' : '') + '₩' + Math.round(Math.abs(n)).toLocaleString('ko-KR'); }
 
+  // ---------------------------------------------------------------------------
+  // 저장 실패 시 입력 보존: 낙관적 UI라 모달을 먼저 닫으므로, 실패하면 입력값으로 다시 열어 준다.
+  //   로그인이 필요한 실패(정적 웹)는 모달이 하단 로그인 버튼을 가리므로 다시 열지 않고 보관만 했다가
+  //   다음에 + 를 누르면 불러온다. 다시 열린 입력은 저장하든 취소하든 한 번 쓰면 버린다.
+  // ---------------------------------------------------------------------------
+  let registerDraft = null; // { payload, edit: 원래 거래 | null }
+
+  function isRegisterModalOpen() {
+    return document.getElementById('register-modal').classList.contains('open');
+  }
+
+  function onRegisterFailed(payload, edit, msg, relogin) {
+    if (relogin || isRegisterModalOpen()) {
+      // 새 등록만 보관한다 (수정은 원래 거래가 그대로 남아 있으므로 다시 열면 된다)
+      if (!edit) registerDraft = { payload: payload, edit: null };
+      showToast(msg + (edit ? '' : ' — 입력한 내용은 보관했습니다. + 를 누르면 불러옵니다.'), true);
+      return;
+    }
+    showToast(msg, true);
+    if (edit) {
+      openEditModal(edit);
+      fillRegisterFields(payload);
+    } else {
+      registerDraft = { payload: payload, edit: null };
+      openRegisterModal();
+    }
+    document.getElementById('reg-error').innerText = msg + ' 입력한 내용을 확인한 뒤 다시 저장해 주세요.';
+  }
+
+  /** 등록/수정 모달 입력란을 거래(또는 입력값) 객체로 채운다. 구분 토글은 호출부가 먼저 맞춘다 */
+  function fillRegisterFields(t) {
+    document.getElementById('reg-date').value = t.날짜 || '';
+    ensureSubCatOption(t.소분류);
+    document.getElementById('reg-sub-cat').value = t.소분류 || '';
+    onRegSubCatChange();
+    // 소분류가 분류_설정에서 사라졌으면 저장된 대분류를 그대로 쓴다. 대분류 이름도 바뀌어 선택지에 없으면
+    // 선택지를 보충한다(없으면 값이 ''가 되어 '필수 항목' 오류로 수정 자체가 막혔다).
+    if (!subCatToMainCat[t.소분류] && t.대분류) {
+      ensureMainCatOption(t.대분류);
+      document.getElementById('reg-main-cat').value = t.대분류;
+    }
+    document.getElementById('reg-content').value = t.내용 || '';
+    document.getElementById('reg-amount').value = Math.abs(Number(t.금액) || 0) || '';
+    document.getElementById('reg-note').value = t.비고 || '';
+
+    const paySel = document.getElementById('reg-payment');
+    if (Array.from(paySel.options).some(o => o.value === t.결제수단)) paySel.value = t.결제수단;
+    else { paySel.value = '__etc__'; document.getElementById('reg-payment-etc').value = t.결제수단 || ''; }
+    onRegPaymentChange();
+  }
+
+  function ensureMainCatOption(mainCat) {
+    if (!mainCat) return;
+    const sel = document.getElementById('reg-main-cat');
+    if (!Array.from(sel.options).some(o => o.value === mainCat)) sel.appendChild(new Option(mainCat, mainCat));
+  }
+
+  /** 비고 속 정기 자동입력 표시("정기지출 자동입력#ID"). 수정 때 지워지면 다음 실행이 같은 거래를 또 넣는다 */
+  function regularMarkerOf(note) {
+    const m = String(note || '').match(/정기(?:지출|수입) 자동입력#\S+/);
+    return m ? m[0] : '';
+  }
+
+  // ---------------------------------------------------------------------------
+  // 휴대폰 뒤로가기: 모달이 열려 있으면 페이지를 떠나지 않고 모달만 닫는다 (입력 소실 방지).
+  //   Apps Script 웹앱은 샌드박스 iframe(googleusercontent.com) 안이라 history를 쓰지 않는다.
+  // ---------------------------------------------------------------------------
+  const MODAL_HISTORY = typeof location !== 'undefined' && typeof history !== 'undefined' &&
+                        !/googleusercontent\.com$/.test(location.hostname);
+
+  function pushModalHistory() {
+    if (!MODAL_HISTORY) return;
+    try { if (!(history.state && history.state.bobModal)) history.pushState({ bobModal: 1 }, ''); } catch (e) {}
+  }
+
+  let pendingModalBack = false; // 코드가 모달을 닫으며 부른 history.back()의 popstate는 무시한다
+
+  if (MODAL_HISTORY) {
+    window.addEventListener('popstate', () => {
+      if (pendingModalBack) {
+        pendingModalBack = false;
+        // 그 사이 모달이 다시 열렸으면(저장 실패 즉시 재표시) 뒤로가기 기록을 다시 만든다
+        if (isRegisterModalOpen()) pushModalHistory();
+        return;
+      }
+      if (isRegisterModalOpen()) closeRegisterModal(true);
+    });
+  }
+
   function openRegisterModal() {
     editingTxn = null;
     document.getElementById('register-modal-title').innerText = '신규 등록';
@@ -1030,7 +1119,16 @@
     document.getElementById('reg-payment-etc').value = '';
     document.getElementById('reg-payment-etc').style.display = 'none';
     setRegType('지출');
+    // 저장하지 못하고 보관해 둔 입력이 있으면 불러온다 (한 번 쓰면 버린다)
+    if (registerDraft && !registerDraft.edit) {
+      const d = registerDraft.payload;
+      registerDraft = null;
+      setRegType(d.구분);
+      fillRegisterFields(d);
+      document.getElementById('reg-error').innerText = '저장하지 못한 입력을 불러왔습니다. 확인 후 다시 저장해 주세요.';
+    }
     document.getElementById('register-modal').classList.add('open');
+    pushModalHistory();
   }
 
   function openEditModal(txn) {
@@ -1043,22 +1141,9 @@
     document.querySelectorAll('#reg-type-toggle .seg-btn').forEach(b => b.disabled = true);
     document.getElementById('reg-type-lock').style.display = 'inline';
     document.getElementById('quick-add-wrap').style.display = 'none';
-    document.getElementById('reg-date').value = txn.날짜 || '';
-    
-    ensureSubCatOption(txn.소분류);
-    document.getElementById('reg-sub-cat').value = txn.소분류 || '';
-    onRegSubCatChange();
-    if (!subCatToMainCat[txn.소분류] && txn.대분류) document.getElementById('reg-main-cat').value = txn.대분류;
-    
-    document.getElementById('reg-content').value = txn.내용 || '';
-    document.getElementById('reg-amount').value = Math.abs(txn.금액 || 0);
-    document.getElementById('reg-note').value = txn.비고 || '';
-
-    const paySel = document.getElementById('reg-payment');
-    if (Array.from(paySel.options).some(o => o.value === txn.결제수단)) paySel.value = txn.결제수단;
-    else { paySel.value = '__etc__'; document.getElementById('reg-payment-etc').value = txn.결제수단 || ''; }
-    onRegPaymentChange();
+    fillRegisterFields(txn);
     document.getElementById('register-modal').classList.add('open');
+    pushModalHistory();
   }
 
   /**
@@ -1083,7 +1168,13 @@
       .deleteTransaction(txn);
   }
 
-  function closeRegisterModal() { document.getElementById('register-modal').classList.remove('open'); }
+  /** fromHistory: 뒤로가기로 닫힌 경우(이미 기록이 빠졌으므로 history.back()을 또 부르지 않는다) */
+  function closeRegisterModal(fromHistory) {
+    document.getElementById('register-modal').classList.remove('open');
+    if (fromHistory !== true && MODAL_HISTORY) {
+      try { if (history.state && history.state.bobModal) { pendingModalBack = true; history.back(); } } catch (e) {}
+    }
+  }
 
   function setRegType(type) {
     regType = type;
@@ -1138,9 +1229,14 @@
     const amount = Number(document.getElementById('reg-amount').value);
     const paymentSel = document.getElementById('reg-payment').value;
     const payment = paymentSel === '__etc__' ? document.getElementById('reg-payment-etc').value.trim() : paymentSel;
-    const note = document.getElementById('reg-note').value.trim();
+    let note = document.getElementById('reg-note').value.trim();
 
     if (!date || !mainCat || !subCat || !amount || amount <= 0 || !payment) { errorEl.innerText = '필수 항목을 모두 입력해 주세요.'; return; }
+
+    // 정기 자동입력 거래를 고칠 때 비고의 "정기지출 자동입력#ID" 표시가 지워지면 자동입력이 같은 거래를
+    // 다시 넣는다. 사용자가 쓴 메모는 그대로 두고 표시만 앞에 되살린다.
+    const marker = editingTxn ? regularMarkerOf(editingTxn.비고) : '';
+    if (marker && note.indexOf(marker) === -1) note = marker + (note ? ' ' + note : '');
 
     const payload = { 구분: regType, 날짜: date, 대분류: mainCat, 소분류: subCat, 내용: content, 금액: amount, 결제수단: payment, 비고: note };
     // 서버의 normalizeAmount와 같은 규칙으로 부호를 맞춰 화면에 먼저 반영한다
@@ -1161,12 +1257,12 @@
           if (res && res.ok) { if (res.txn) applyLocalChange('update', res.txn); }
           else {
             applyLocalChange('update', prev);
-            showToast('수정 실패: ' + (res && res.message ? res.message : '알 수 없는 오류'), true);
+            onRegisterFailed(payload, prev, '수정 실패: ' + (res && res.message ? res.message : '알 수 없는 오류'));
           }
         })
         .withFailureHandler(err => {
           applyLocalChange('update', prev);
-          showToast('수정 실패: ' + (err && err.message ? err.message : String(err)), true);
+          onRegisterFailed(payload, prev, '수정 실패: ' + (err && err.message ? err.message : String(err)), err && err.relogin);
         })
         .updateTransaction(payload);
 
@@ -1182,11 +1278,11 @@
         .withSuccessHandler(res => {
           removeTemp();
           if (res && res.ok) applyLocalChange('save', res.txn || Object.assign({}, payload, { 금액: signed }));
-          else showToast('저장 실패: ' + (res && res.message ? res.message : '알 수 없는 오류'), true);
+          else onRegisterFailed(payload, null, '저장 실패: ' + (res && res.message ? res.message : '알 수 없는 오류'));
         })
         .withFailureHandler(err => {
           removeTemp();
-          showToast('저장 실패: ' + (err && err.message ? err.message : String(err)), true);
+          onRegisterFailed(payload, null, '저장 실패: ' + (err && err.message ? err.message : String(err)), err && err.relogin);
         })
         .saveTransaction(payload);
     }
@@ -1382,7 +1478,7 @@
 
         accHtml += `
           <div class="acc-group" data-date="${escapeHtml(d)}">
-            <div class="acc-header" onclick="toggleAcc('${d}')">
+            <div class="acc-header" onclick="toggleAcc(this.parentElement.getAttribute('data-date'))">
               <div><span class="acc-date">${formatDateLabel(d)}</span><span class="acc-count">${rows.length}건</span></div>
               <div class="acc-total" style="${colorClass}">${formatWon(daySum)} <span class="acc-icon" style="font-size:12px; margin-left:4px;">${icon}</span></div>
             </div>
@@ -1465,7 +1561,7 @@
     }
   </script>
   <script src="sheets-data.js?v=f2d3ba47"></script>
-  <script src="sheets-write.js?v=d0c65cf1"></script>
-  <script src="static-adapter.js?v=162fffae"></script>
+  <script src="sheets-write.js?v=502a5658"></script>
+  <script src="static-adapter.js?v=dfd90f34"></script>
 </body>
 </html>
