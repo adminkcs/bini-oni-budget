@@ -139,6 +139,15 @@ console.log('\n=== 검색 · 드릴다운 필터 ===');
   r.check('예산 소분류 진입 시 지출 분석 드릴다운 해제', evalIn(ctx, 'drilldownMain'), null);
   ctx.setDrilldown('주거');
   r.check('지출 분석 드릴다운 진입 시 예산 소분류 해제', evalIn(ctx, 'budgetDrillMain'), null);
+
+  // 모바일 탭 전환: 어느 쪽 소분류에 있든 둘 다 닫고 거래내역은 전체
+  ctx.setDrilldown('주거');
+  ctx.clearAllDrilldowns();
+  r.check('탭 전환: 지출 분석 소분류 해제', evalIn(ctx, 'drilldownMain'), null);
+  ctx.setBudgetDrilldown('식비');
+  ctx.clearAllDrilldowns();
+  r.check('탭 전환: 예산 소분류 해제', evalIn(ctx, 'budgetDrillMain'), null);
+  r.check('탭 전환 후 거래내역 전체', ctx.applyBudgetDrillToList(ctx.getFilteredTransactions()).length, 3);
 }
 
 r.done();

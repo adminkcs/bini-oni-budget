@@ -781,6 +781,14 @@
     if (typeof renderView === 'function') renderView();
   }
 
+  /** 모바일 탭을 바꿀 때: 두 소분류 보기를 모두 닫아 거래내역을 처음처럼 전체로 되돌린다 */
+  function clearAllDrilldowns() {
+    if (!budgetDrillMain && !drilldownMain) return;
+    budgetDrillMain = null;
+    drilldownMain = null;
+    if (typeof renderView === 'function') renderView();
+  }
+
   /** renderBudgetHtml()을 innerHTML로 심은 뒤 호출한다. 대분류 행 클릭을 드릴다운에 연결한다. */
   function bindBudgetDrillClicks(containerId) {
     const box = document.getElementById(containerId);
@@ -1289,7 +1297,10 @@
     let startX = 0, startY = 0;
 
     // [탭] 예산 집행률 / 지출 분석 전환. 데이터는 이미 둘 다 렌더돼 있고 표시만 바꾼다.
+    // 다른 탭으로 옮기면 소분류 보기를 닫아 거래내역을 전체로 되돌린다 (같은 탭 재클릭은 그대로).
     function setStatsTab(tab) {
+      const prevTab = document.getElementById('tab-btn-analysis').classList.contains('active') ? 'analysis' : 'budget';
+      if (prevTab !== tab) clearAllDrilldowns();
       document.getElementById('tab-pane-budget').style.display = tab === 'budget' ? 'block' : 'none';
       document.getElementById('tab-pane-analysis').style.display = tab === 'analysis' ? 'block' : 'none';
       document.getElementById('tab-btn-budget').classList.toggle('active', tab === 'budget');
@@ -1453,8 +1464,8 @@
       }
     }
   </script>
-  <script src="sheets-data.js?v=2c60f186"></script>
-  <script src="sheets-write.js?v=ca8be10f"></script>
-  <script src="static-adapter.js?v=ab23a49b"></script>
+  <script src="sheets-data.js?v=f2d3ba47"></script>
+  <script src="sheets-write.js?v=d0c65cf1"></script>
+  <script src="static-adapter.js?v=162fffae"></script>
 </body>
 </html>

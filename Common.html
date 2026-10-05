@@ -653,6 +653,14 @@
     if (typeof renderView === 'function') renderView();
   }
 
+  /** 모바일 탭을 바꿀 때: 두 소분류 보기를 모두 닫아 거래내역을 처음처럼 전체로 되돌린다 */
+  function clearAllDrilldowns() {
+    if (!budgetDrillMain && !drilldownMain) return;
+    budgetDrillMain = null;
+    drilldownMain = null;
+    if (typeof renderView === 'function') renderView();
+  }
+
   /** renderBudgetHtml()을 innerHTML로 심은 뒤 호출한다. 대분류 행 클릭을 드릴다운에 연결한다. */
   function bindBudgetDrillClicks(containerId) {
     const box = document.getElementById(containerId);
