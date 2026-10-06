@@ -913,22 +913,12 @@ function onEdit(e) {
   }
   if (!needsIdGeneration) return;
 
-  var existingIds = new Set();
-  if (sheet.getLastRow() > 1) {
-    sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues().forEach(function (row) {
-      if (row[0]) existingIds.add(String(row[0]));
-    });
-  }
-
+  // 앱 저장과 같은 12자리 형식(generateUniqueUuid). 예전에는 8자리를 만들고 중복 확인용으로
+  // A열 전체를 읽었는데, 12자리(48비트)는 충돌 확률이 무시 가능해 그 읽기를 뺐다.
   var hasUpdates = false;
   for (var r2 = 0; r2 < numRows; r2++) {
     if (!currentIds[r2][0] || String(currentIds[r2][0]).trim() === "") {
-      var newUuid = Utilities.getUuid().substring(0, 8);
-      while (existingIds.has(newUuid)) {
-        newUuid = Utilities.getUuid().substring(0, 8);
-      }
-      currentIds[r2][0] = asText(newUuid); // 숫자만 있는 ID가 숫자로 바뀌지 않게
-      existingIds.add(newUuid);
+      currentIds[r2][0] = asText(generateUniqueUuid(sheet)); // 숫자만 있는 ID가 숫자로 바뀌지 않게
       hasUpdates = true;
     }
   }
@@ -1015,6 +1005,7 @@ function onOpen() {
     .addItem('[1회성] 감사 컬럼 추가', 'migrateAddAuditColumns') // [STEP3]
     .addItem('[1회성] 날짜 타입 정규화', 'normalizeExistingDates')
     .addItem('[1회성] 금액 부호 정규화', 'fixExistingAmountSigns')
+    .addItem('[1회성] 일련번호 형식 통일', 'normalizeTxnIds')
     .addSeparator()
     .addItem('[주의] 과거 데이터 이관', 'archiveOldTransactions')
     .addToUi();
@@ -1746,9 +1737,9 @@ function checkAndFixDuplicateUUIDs() {
       var id = String(data[i][0]).trim();
       if (!id) continue;
       if (seen[id]) {
-        var newUuid = Utilities.getUuid().substring(0, 8);
+        var newUuid = generateUniqueUuid(sheet);
         while (seen[newUuid]) {
-          newUuid = Utilities.getUuid().substring(0, 8);
+          newUuid = generateUniqueUuid(sheet);
         }
         sheet.getRange(i + 1, 1).setValue(asText(newUuid));
         seen[newUuid] = true; 
@@ -1760,6 +1751,73 @@ function checkAndFixDuplicateUUIDs() {
     }
   });
   Logger.log("UUID 중복 검사 완료. 총 " + changedCount + "건 수정됨.");
+}
+
+/**
+ * ==============================================================================
+ * ★ (1회성) 거래 일련번호를 앱 저장 형식(12자리 16진수 글자)으로 통일
+ * 예전 8자리 ID, 시트 직접 입력으로 생긴 ID, 숫자로 바뀐 ID(예: "8.62E+11")를
+ * generateUniqueUuid 형식으로 바꾼다. 행 순서·다른 칸은 건드리지 않고 A열만 쓴다.
+ * 거래 일련번호는 다른 곳에서 참조하지 않는다(정기 자동입력은 비고의 '#정기항목ID'를 쓴다).
+ * 정기 설정 시트의 ID는 그 비고와 묶여 있어 바꾸지 않는다.
+ * ==============================================================================
+ */
+var TXN_ID_PATTERN = /^[0-9a-f]{12}$/;
+
+/** 이 값이 앱 형식 일련번호인가 (글자형 12자리 16진수). 숫자형은 모양이 같아도 아니다 */
+function isAppTxnId(v) {
+  return typeof v === 'string' && TXN_ID_PATTERN.test(v);
+}
+
+function normalizeTxnIds() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log("[일련번호 통일] 다른 작업이 실행 중이어서 중단합니다.");
+    return;
+  }
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var targets = [SHEET_LOG, SHEET_INCOME, SHEET_LOG + '_보관함', SHEET_INCOME + '_보관함'];
+    var plans = [], seen = {};
+
+    // 1) 모든 대상 시트를 먼저 읽어 이미 쓰는 ID를 모은다 (새 ID가 기존 것과 겹치지 않게)
+    targets.forEach(function (name) {
+      var sheet = ss.getSheetByName(name);
+      if (!sheet || sheet.getLastRow() < 2) return;
+      var range = sheet.getRange(2, 1, sheet.getLastRow() - 1, 6);   // A~F: ID 여부 + 빈 행 판별
+      var values = range.getValues();
+      values.forEach(function (r) { if (isAppTxnId(r[0])) seen[r[0]] = true; });
+      plans.push({ name: name, sheet: sheet, values: values });
+    });
+
+    // 2) 형식이 다른 ID만 새로 발급해 A열에 한 번에 쓴다
+    var report = [], total = 0;
+    plans.forEach(function (p) {
+      var ids = p.values.map(function (r) { return [r[0]]; });
+      var changed = 0;
+      for (var i = 0; i < p.values.length; i++) {
+        var r = p.values[i];
+        var empty = r.every(function (c) { return c === '' || c === null; });
+        if (empty || isAppTxnId(r[0])) continue;
+        var newId = generateUniqueUuid(p.sheet);
+        while (seen[newId]) newId = generateUniqueUuid(p.sheet);
+        seen[newId] = true;
+        Logger.log("[" + p.name + "] " + (i + 2) + "행: " + r[0] + " -> " + newId);
+        ids[i][0] = asText(newId);
+        changed++;
+      }
+      if (changed > 0) p.sheet.getRange(2, 1, ids.length, 1).setValues(ids);
+      report.push(p.name + " " + changed + "건");
+      total += changed;
+    });
+
+    var summary = "일련번호 형식 통일: " + report.join(", ");
+    Logger.log(summary);
+    logRun("normalizeTxnIds", "성공", total, summary);
+    try { SpreadsheetApp.getUi().alert(summary); } catch (e) { /* 편집기 실행 시 UI 없음 */ }
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function fixExistingAmountSigns() {
