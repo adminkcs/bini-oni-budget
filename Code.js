@@ -1006,6 +1006,7 @@ function onOpen() {
     .addItem('[1회성] 날짜 타입 정규화', 'normalizeExistingDates')
     .addItem('[1회성] 금액 부호 정규화', 'fixExistingAmountSigns')
     .addItem('[1회성] 일련번호 형식 통일', 'normalizeTxnIds')
+    .addItem('[1회성] 정기 항목 ID 형식 통일', 'normalizeRegularIds')
     .addSeparator()
     .addItem('[주의] 과거 데이터 이관', 'archiveOldTransactions')
     .addToUi();
@@ -1814,6 +1815,82 @@ function normalizeTxnIds() {
     var summary = "일련번호 형식 통일: " + report.join(", ");
     Logger.log(summary);
     logRun("normalizeTxnIds", "성공", total, summary);
+    try { SpreadsheetApp.getUi().alert(summary); } catch (e) { /* 편집기 실행 시 UI 없음 */ }
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * ==============================================================================
+ * ★ (1회성) 정기 항목 ID를 12자리 형식으로 통일 + 자동입력 행 비고의 '#ID'도 함께 변경
+ * 정기 자동입력의 중복 판정은 비고 "정기지출 자동입력#<ID>"로 하므로, ID만 바꾸면 이미 들어간
+ * 행을 못 알아봐 다시 입력된다. 그래서 같은 잠금 안에서 비고를 먼저 바꾸고 ID를 바꾼다.
+ *   - 같은 ID가 두 줄 이상이면 어느 항목의 비고인지 알 수 없어 그 ID는 건너뛴다.
+ *   - 비고는 바뀐 칸만 쓴다(다른 메모 칸을 다시 쓰지 않게).
+ *   - 옛 ID → 새 ID 대응표는 실행 기록(Logger)에 남긴다.
+ * ==============================================================================
+ */
+function normalizeRegularIds() {
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(30000)) {
+    Logger.log("[정기 ID 통일] 다른 작업이 실행 중이어서 중단합니다.");
+    return;
+  }
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var regSheet = ss.getSheetByName(SHEET_REGULAR);
+    if (!regSheet || regSheet.getLastRow() < 2) return;
+
+    var regValues = regSheet.getRange(2, 1, regSheet.getLastRow() - 1, 2).getValues(); // A ID, B 항목명
+    var count = {};
+    regValues.forEach(function (r) { var k = String(r[0]).trim(); if (k) count[k] = (count[k] || 0) + 1; });
+
+    var map = {}, seen = {}, skippedDup = [];
+    regValues.forEach(function (r) { if (isAppTxnId(r[0])) seen[r[0]] = true; });
+    var ids = regValues.map(function (r) { return [r[0]]; });
+    var changedIds = 0;
+    for (var i = 0; i < regValues.length; i++) {
+      var oldId = String(regValues[i][0]).trim();
+      if (!oldId && String(regValues[i][1]).trim() === "") continue;   // 빈 행
+      if (isAppTxnId(regValues[i][0])) continue;
+      if (oldId && count[oldId] > 1) { skippedDup.push(oldId); continue; }
+      var newId = generateUniqueUuid(regSheet);
+      while (seen[newId]) newId = generateUniqueUuid(regSheet);
+      seen[newId] = true;
+      if (oldId) map[oldId] = newId;
+      Logger.log("[정기 ID] " + (i + 2) + "행 " + regValues[i][1] + ": " + (oldId || "(빈칸)") + " -> " + newId);
+      ids[i][0] = asText(newId);
+      changedIds++;
+    }
+
+    // 1) 거래·보관함 시트의 자동입력 비고에서 옛 ID를 새 ID로 바꾼다 (바뀐 칸만 쓴다)
+    var targets = [SHEET_LOG, SHEET_INCOME, SHEET_LOG + '_보관함', SHEET_INCOME + '_보관함'];
+    var changedNotes = 0;
+    targets.forEach(function (name) {
+      var sheet = ss.getSheetByName(name);
+      if (!sheet || sheet.getLastRow() < 2) return;
+      var notes = sheet.getRange(2, COL.NOTE, sheet.getLastRow() - 1, 1).getValues();
+      for (var j = 0; j < notes.length; j++) {
+        var note = notes[j][0];
+        if (typeof note !== 'string') continue;
+        if (note.indexOf(NOTE_PREFIX_EXPENSE) === -1 && note.indexOf(NOTE_PREFIX_INCOME) === -1) continue;
+        var oldRef = regularIdFromNote(note);
+        if (!oldRef || !map[oldRef]) continue;
+        var newNote = note.replace("#" + oldRef, "#" + map[oldRef]);
+        sheet.getRange(j + 2, COL.NOTE).setValue(asText(newNote));
+        changedNotes++;
+      }
+    });
+
+    // 2) 정기 설정 시트의 ID를 바꾼다
+    if (changedIds > 0) regSheet.getRange(2, 1, ids.length, 1).setValues(ids);
+    SpreadsheetApp.flush();
+
+    var summary = "정기 ID 통일: 항목 " + changedIds + "건, 비고 " + changedNotes + "건" +
+                  (skippedDup.length ? ", 중복 ID라 건너뜀 " + skippedDup.join(", ") : "");
+    Logger.log(summary);
+    logRun("normalizeRegularIds", "성공", changedIds, summary);
     try { SpreadsheetApp.getUi().alert(summary); } catch (e) { /* 편집기 실행 시 UI 없음 */ }
   } finally {
     lock.releaseLock();
