@@ -1324,27 +1324,16 @@ function ensureBudgetSheet() {
     sheet.getRange("C2:C").setNumberFormat("#,##0");
   }
 
-  // 대분류 드롭다운을 '분류_설정'의 대분류 목록으로 구성
-  var catSheet = ss.getSheetByName(SHEET_CATEGORY);
-  if (catSheet && catSheet.getLastRow() > 1) {
-    var mains = [];
-    catSheet.getRange(2, 1, catSheet.getLastRow() - 1, 1).getValues().forEach(function (r) {
-      var v = String(r[0] || "").trim();
-      if (v && mains.indexOf(v) === -1) mains.push(v);
-    });
-    if (mains.length > 0) {
-      var rule = SpreadsheetApp.newDataValidation().requireValueInList(mains, true).setAllowInvalid(true).build();
-      sheet.getRange(2, 2, Math.max(sheet.getMaxRows() - 1, 1), 1).setDataValidation(rule);
-    }
-  }
+  // 대분류 칸에는 드롭다운을 걸지 않는다. 목록이 만든 시점에 고정돼 분류_설정을 바꾸면
+  // 옛 이름만 남고 정상 값에도 '잘못됨' 표시가 붙었다(2026-10-06 사용자 요청으로 제거).
 
   var msg = (created ? "'" + SHEET_BUDGET + "' 시트를 만들었습니다.\n\n" : "'" + SHEET_BUDGET + "' 시트가 이미 있습니다.\n\n") +
     "입력 예시\n" +
     "  년월      대분류        예산액\n" +
-    "  2026-09   생활 소비     600000\n" +
+    "  2026-09   생활          600000\n" +
     "  2026-09   주거          800000\n\n" +
     "· 년월은 'YYYY-MM' 형식으로 입력합니다.\n" +
-    "· 대분류는 분류_설정의 이름과 정확히 같아야 합니다(드롭다운 제공).\n" +
+    "· 대분류는 분류_설정의 이름과 정확히 같게 입력합니다.\n" +
     "· 예산액은 양수로 입력합니다.\n" +
     "· 입력 후 대시보드를 새로고침하면 집행률이 표시됩니다.";
   Logger.log("[예산 시트] " + msg);
