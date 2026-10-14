@@ -347,7 +347,7 @@ function notifyFailure(functionName, err) {
  *      은행 자동이체도 관례상 말일에 집행된다)
  *   - "요일"이 포함되면 기존과 동일하게 요일 기준으로만 판정한다
  *     (일자와 혼재해도 기존 동작을 그대로 유지)
- * ※ 휴일/공휴일 보정은 이번 범위에서 제외. CalendarApp을 사용하지 않으며
+ * ※ 휴일/공휴일 보정은 이번 범위에서 제외. 캘린더 서비스를 사용하지 않으며
  *   정기 설정 시트의 휴일 관련 컬럼은 읽지 않는다.
  * ==============================================================================
  */
@@ -987,28 +987,31 @@ function scheduledSortLogSheet() {
  * ==============================================================================
  */
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('가계부 도구')
-    .addItem('내역 정렬', 'sortLogSheetByDate')
-    .addItem('정기 항목 수동 실행', 'insertRegularExpenses')
-    .addItem('중복 일련번호 검사', 'checkAndFixDuplicateUUIDs')
-    .addItem('분류 설정 점검', 'validateCategorySheet')
-    .addItem('분류 유효성 표시 적용(색상)', 'applyCategoryValidityHighlight') // [신규]
-    .addItem('예산 시트 만들기', 'ensureBudgetSheet')           // [STEP3B]
-    .addItem('예산 지난달 값 수동 복사', 'copyBudgetToNewMonth') // [STEP3B]
-    .addItem('스크립트 속성 점검', 'setupScriptProperties')      // 민감값을 코드에서 뺀 뒤 상태 확인용
-    .addItem('지금 백업', 'backupNow')                          // 트리거 백업 실패 시 수동 실행 + 권한 재승인
+  // 메뉴 이름은 "무엇을 하는지"가 보이게 쓴다. 자주 쓰는 것은 위에, 나머지는 하위 메뉴로 묶는다.
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('가계부 도구')
+    .addItem('지금 백업하기 (권한 다시 승인도 여기서)', 'backupNow')
+    .addItem('오늘 정기 항목 지금 입력하기', 'insertRegularExpenses')
+    .addItem('지난달 예산을 이번 달로 복사', 'copyBudgetToNewMonth')
     .addSeparator()
-    .addItem('삭제 대기 행 정리', 'purgeDeletedRows')          // [STEP3] 소프트 삭제 정리
-    .addItem('트리거 설치/재설치', 'installTriggers')          // [STEP3] 배포 재현성
-    .addSeparator()
-    .addItem('[1회성] 감사 컬럼 추가', 'migrateAddAuditColumns') // [STEP3]
-    .addItem('[1회성] 날짜 타입 정규화', 'normalizeExistingDates')
-    .addItem('[1회성] 금액 부호 정규화', 'fixExistingAmountSigns')
-    .addItem('[1회성] 일련번호 형식 통일', 'normalizeTxnIds')
-    .addItem('[1회성] 정기 항목 ID 형식 통일', 'normalizeRegularIds')
-    .addSeparator()
-    .addItem('[주의] 과거 데이터 이관', 'archiveOldTransactions')
+    .addSubMenu(ui.createMenu('점검')
+      .addItem('설정값(스크립트 속성) 확인', 'setupScriptProperties')
+      .addItem('분류 설정에서 겹치는 소분류 찾기', 'validateCategorySheet')
+      .addItem('겹치는 일련번호 찾아서 새 번호로 바꾸기', 'checkAndFixDuplicateUUIDs')
+      .addItem('잘못된 분류 칸 색칠 켜기 (처음 1번)', 'applyCategoryValidityHighlight'))
+    .addSubMenu(ui.createMenu('관리')
+      .addItem('자동 실행 다시 설치 (권한 오류 메일이 올 때)', 'installTriggers')
+      .addItem('삭제한 지 ' + PURGE_AFTER_DAYS + '일 지난 행 완전히 지우기', 'purgeDeletedRows')
+      .addItem('내역을 날짜순으로 정렬 (아무도 입력하지 않을 때만)', 'sortLogSheetByDate')
+      .addItem('예산 시트 만들기 (없을 때만)', 'ensureBudgetSheet')
+      .addSeparator()
+      .addItem('[주의] 작년 이전 내역을 보관함으로 옮기기', 'archiveOldTransactions'))
+    .addSubMenu(ui.createMenu('예전 1회성 작업 (이미 했으면 안 해도 됨)')
+      .addItem('입력자·입력시각·삭제 칸 추가', 'migrateAddAuditColumns')
+      .addItem('글자로 된 날짜를 날짜 형식으로 바꾸기', 'normalizeExistingDates')
+      .addItem('금액 부호 맞추기 (지출 -, 수입 +)', 'fixExistingAmountSigns')
+      .addItem('일련번호를 12자리로 통일', 'normalizeTxnIds')
+      .addItem('정기 항목 ID를 12자리로 통일', 'normalizeRegularIds'))
     .addToUi();
 }
 
@@ -1559,14 +1562,15 @@ function installTriggers() {
     // 분량을 한 번에 미리 등록한다. 멱등성 키가 동일해 매일 트리거와 겹쳐도 중복되지 않는다.
     { fn: 'insertRegularExpensesForMonth', monthDay: 1, hour: 1, desc: '정기 항목 이번 달 일괄 등록 (매월 1일 01~02시)' }
   ];
-  var managed = plan.map(function (p) { return p.fn; });
-
+  // plan에 없는 트리거도 지운다(설치형 트리거는 이 plan이 전부). 예전에 손으로 만든
+  // sortLogSheetByDate 매시간 트리거가 남아 04시 제한 없이 정렬을 시도하다 권한 오류 메일을 보냈다.
   var removed = 0;
+  var legacy = [];
   ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (managed.indexOf(t.getHandlerFunction()) !== -1) {
-      ScriptApp.deleteTrigger(t);
-      removed++;
-    }
+    var fn = t.getHandlerFunction();
+    if (!plan.some(function (p) { return p.fn === fn; })) legacy.push(fn);
+    ScriptApp.deleteTrigger(t);
+    removed++;
   });
 
   plan.forEach(function (p) {
@@ -1581,7 +1585,8 @@ function installTriggers() {
     }
   });
 
-  var msg = "기존 트리거 " + removed + "개 제거 후 재생성\n\n" +
+  var msg = "기존 트리거 " + removed + "개 제거 후 재생성\n" +
+            (legacy.length ? "목록에 없던 트리거 정리: " + legacy.join(", ") + "\n" : "") + "\n" +
             plan.map(function (p) { return "· " + p.desc; }).join("\n") +
             "\n\n시간대: " + getSheetTz() +
             "\n※ onEdit / onOpen은 단순 트리거라 설치가 필요 없습니다.";
@@ -1599,7 +1604,7 @@ function getBackupFolderId_() {
   var folderId = PropertiesService.getScriptProperties().getProperty('BACKUP_FOLDER_ID');
   if (!folderId) {
     throw new Error("BACKUP_FOLDER_ID 스크립트 속성이 설정되지 않았습니다. " +
-                    "[가계부 도구 > 스크립트 속성 점검]에서 확인하세요.");
+                    "[가계부 도구 > 점검 > 설정값(스크립트 속성) 확인]에서 확인하세요.");
   }
   return folderId;
 }
