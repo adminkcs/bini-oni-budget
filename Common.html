@@ -177,6 +177,7 @@
   let searchKeyword = '';   // 내용/비고 검색어
   let drilldownMain = null; // 소분류 드릴다운 대상 대분류 (null이면 대분류 보기)
   let budgetDrillMain = null; // [신규] 예산 집행률 카드 전용 소분류 드릴다운 대상 대분류
+  let drillSub = null;        // [신규] 소분류 보기에서 고른 소분류 (거래내역만 이 소분류로 거른다)
   let budgetMap = {};       // { 'YYYY-MM': { 대분류: 예산액 } }
 
   // [퀵등록] 자주 쓰는 항목 집계 기준
@@ -600,7 +601,7 @@
       return subRows.map((r, i) => {
         const pct = total > 0 ? Math.round((r.금액 / total) * 100) : 0;
         return `
-          <div class="rank-row">
+          <div class="rank-row ${subRowClass(r.소분류)}" data-drill-sub="${escapeHtml(r.소분류)}">
             <div class="rank-header"><span>${escapeHtml(r.소분류)}</span><span>${formatWon(r.금액)} <span style="color:var(--text-dim); font-size:12px;">${pct}%</span></span></div>
             <div class="rank-bg"><div class="rank-fill" style="width:${pct}%; background:${paletteAt(i)};"></div></div>
           </div>`;
@@ -640,6 +641,7 @@
   function setBudgetDrilldown(mainCat) {
     budgetDrillMain = mainCat;
     drilldownMain = null; // 거래내역은 마지막에 고른 분류 하나로만 거른다
+    drillSub = null;
     if (typeof renderView === 'function') renderView();
   }
 
@@ -648,16 +650,39 @@
     return budgetDrillMain ? list.filter(t => t.대분류 === budgetDrillMain) : list;
   }
 
+  /** 거래내역 목록용: 예산 소분류 보기의 대분류 + 고른 소분류까지 거른다 (집계에는 쓰지 않음) */
+  function applyDrillToList(list) {
+    const l = applyBudgetDrillToList(list);
+    return drillSub ? l.filter(t => (t.소분류 || '기타') === drillSub) : l;
+  }
+
+  /** 소분류 보기에서 소분류를 고르거나(같은 것을 다시 누르면) 해제한다 */
+  function setDrillSub(sub) {
+    if (!budgetDrillMain && !drilldownMain) return;
+    drillSub = (drillSub === sub) ? null : sub;
+    if (typeof renderView === 'function') renderView();
+  }
+
+  /** 소분류 줄 강조용 class: 고른 줄은 강조, 나머지는 흐리게 */
+  function subRowClass(sub) {
+    return 'rank-clickable' + (drillSub ? (drillSub === sub ? ' sub-selected' : ' sub-dim') : '');
+  }
+
+  /** 소분류 보기 중인지 (거래내역 전부 펼침 기준) */
+  function isDrillActive() { return !!(budgetDrillMain || drilldownMain); }
+
   function clearBudgetDrilldown() {
     budgetDrillMain = null;
+    drillSub = null;
     if (typeof renderView === 'function') renderView();
   }
 
   /** 모바일 탭을 바꿀 때: 두 소분류 보기를 모두 닫아 거래내역을 처음처럼 전체로 되돌린다 */
   function clearAllDrilldowns() {
-    if (!budgetDrillMain && !drilldownMain) return;
+    if (!budgetDrillMain && !drilldownMain && !drillSub) return;
     budgetDrillMain = null;
     drilldownMain = null;
+    drillSub = null;
     if (typeof renderView === 'function') renderView();
   }
 
@@ -737,11 +762,13 @@
   function setDrilldown(mainCat) {
     drilldownMain = (drilldownMain === mainCat) ? null : mainCat;
     budgetDrillMain = null; // 거래내역은 마지막에 고른 분류 하나로만 거른다
+    drillSub = null;
     if (typeof renderView === 'function') renderView();
   }
 
   function clearDrilldown() {
     drilldownMain = null;
+    drillSub = null;
     if (typeof renderView === 'function') renderView();
   }
 
@@ -863,6 +890,7 @@
     if (!monthVal) return;
     drilldownMain = null; // [STEP3B] 달을 바꾸면 드릴다운은 해제한다
     budgetDrillMain = null;
+    drillSub = null;
     const year = parseInt(monthVal.split('-')[0], 10);
     const month = parseInt(monthVal.split('-')[1], 10);
     if (document.getElementById('start-date')) document.getElementById('start-date').value = `${year}-${String(month).padStart(2, '0')}-01`;

@@ -148,6 +148,42 @@ console.log('\n=== 검색 · 드릴다운 필터 ===');
   ctx.clearAllDrilldowns();
   r.check('탭 전환: 예산 소분류 해제', evalIn(ctx, 'budgetDrillMain'), null);
   r.check('탭 전환 후 거래내역 전체', ctx.applyBudgetDrillToList(ctx.getFilteredTransactions()).length, 3);
+
+  // 소분류 고르기: 거래내역만 그 소분류로 거르고, 집계·소분류 목록은 그대로
+  ctx.setDrillSub('외식');
+  r.check('소분류 보기 밖에서는 무시', evalIn(ctx, 'drillSub'), null);
+
+  ctx.setBudgetDrilldown('식비');
+  ctx.setDrillSub('외식');
+  r.check('예산 소분류 → 외식: 거래내역은 외식만', ctx.applyDrillToList(ctx.getFilteredTransactions()).length, 1);
+  r.check('예산 소분류 → 외식: 소분류 목록은 그대로', ctx.getBudgetSubBreakdown('식비').length, 2);
+  r.check('고른 줄 강조', ctx.subRowClass('외식'), 'rank-clickable sub-selected');
+  r.check('나머지 줄 흐림', ctx.subRowClass('장보기'), 'rank-clickable sub-dim');
+  r.check('예산 소분류 HTML에 소분류 클릭 표시', ctx.renderBudgetHtml().includes('data-drill-sub="장보기"'), true);
+  ctx.setDrillSub('외식');
+  r.check('같은 소분류 다시 누르면 해제', ctx.applyDrillToList(ctx.getFilteredTransactions()).length, 2);
+
+  ctx.setDrilldown('식비');
+  ctx.setDrillSub('장보기');
+  const list = ctx.getFilteredTransactions();
+  r.check('지출 분석 소분류 → 장보기: 집계는 식비 전체', JSON.stringify(ctx.groupExpenses(list)),
+    JSON.stringify({ '외식': 10000, '장보기': 20000 }));
+  r.check('지출 분석 소분류 → 장보기: 거래내역은 장보기만', ctx.applyDrillToList(list).length, 1);
+
+  ctx.clearDrilldown();
+  r.check('대분류로 돌아가면 소분류 해제', evalIn(ctx, 'drillSub'), null);
+
+  ctx.setBudgetDrilldown('식비'); ctx.setDrillSub('외식');
+  ctx.clearAllDrilldowns();
+  r.check('탭 전환: 고른 소분류 해제', evalIn(ctx, 'drillSub'), null);
+
+  ctx.setBudgetDrilldown('식비'); ctx.setDrillSub('외식');
+  ctx.setBudgetDrilldown('주거');
+  r.check('다른 대분류로 가면 소분류 해제', evalIn(ctx, 'drillSub'), null);
+
+  ctx.setDrilldown('식비'); ctx.setDrillSub('외식');
+  ctx.handleMonthChange({ skipRender: true });
+  r.check('달 바꾸면 소분류 해제', evalIn(ctx, 'drillSub'), null);
 }
 
 r.done();

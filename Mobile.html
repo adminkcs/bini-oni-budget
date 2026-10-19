@@ -25,6 +25,8 @@
 
     .rank-row { margin-bottom: 14px; }
     .rank-clickable { cursor: pointer; }  /* [STEP3B] 탭하면 소분류 드릴다운 */
+    .rank-row.sub-selected .rank-header { color: var(--accent); }  /* 고른 소분류 */
+    .rank-row.sub-dim { opacity: .45; }
     .rank-row:last-child { margin-bottom: 0; }
     .rank-header { display: flex; justify-content: space-between; font-size: 14px; font-weight: 700; margin-bottom: 6px; }
     .rank-bg { width: 100%; background: var(--surface-2); height: 8px; border-radius: 4px; overflow: hidden; }
@@ -121,6 +123,9 @@
 
   <script>
     let openDate = null;
+    // 소분류 보기 중에는 거래내역을 전부 펼치고, 사용자가 접은 날짜만 기억한다 (보기가 바뀌면 초기화)
+    let closedDates = new Set();
+    let lastDrillKey = '';
     let currentSwipe = null;
     let startX = 0, startY = 0;
 
@@ -156,14 +161,16 @@
 
       // [STEP3B] 예산 집행률
       document.getElementById('m-budget-head').style.display = budgetDrillMain ? 'flex' : 'none';
-      document.getElementById('m-budget-title').innerText = budgetDrillMain ? `예산 집행률 — ${budgetDrillMain}` : '';
+      const subLabel = drillSub ? ` › ${drillSub}` : '';
+      document.getElementById('m-budget-title').innerText = budgetDrillMain ? `예산 집행률 — ${budgetDrillMain}${subLabel}` : '';
       document.getElementById('m-budget-drill-back').style.display = budgetDrillMain ? 'inline-block' : 'none';
       document.getElementById('m-budget').innerHTML = renderBudgetHtml();
       bindBudgetDrillClicks('m-budget');
+      bindSubClicks('m-budget');
 
       // [STEP3B] 드릴다운 상태 반영
       document.getElementById('m-chart-title').innerText =
-        drilldownMain ? `지출 분석 — ${drilldownMain}` : '지출 분석';
+        drilldownMain ? `지출 분석 — ${drilldownMain}${subLabel}` : '지출 분석';
       document.getElementById('m-drill-back').style.display = drilldownMain ? 'inline-block' : 'none';
 
       // [STEP3B] 드릴다운이면 소분류 기준으로 집계
@@ -174,7 +181,7 @@
       sortedCats.forEach(([cat, amt], i) => {
         const pct = exSum > 0 ? Math.round((amt / exSum) * 100) : 0;
         rankHtml += `
-          <div class="rank-row ${drilldownMain ? '' : 'rank-clickable'}" ${drilldownMain ? '' : `data-drill="${escapeHtml(cat)}"`}>
+          <div class="rank-row ${drilldownMain ? subRowClass(cat) : 'rank-clickable'}" ${drilldownMain ? `data-drill-sub="${escapeHtml(cat)}"` : `data-drill="${escapeHtml(cat)}"`}>
             <div class="rank-header"><span>${escapeHtml(cat)}</span><span>${formatWon(amt)} <span style="color:var(--text-dim); font-size:12px;">${pct}%</span></span></div>
             <div class="rank-bg"><div class="rank-fill" style="width:${pct}%; background:${paletteAt(i)};"></div></div>
           </div>
@@ -188,9 +195,24 @@
       if (!drilldownMain) {
         rankBox.querySelectorAll('[data-drill]').forEach(el =>
           el.addEventListener('click', () => setDrilldown(el.getAttribute('data-drill'))));
+      } else {
+        bindSubClicks('m-ranking');
       }
 
-      renderAccordion(applyBudgetDrillToList(list));
+      const drillKey = isDrillActive() ? `${budgetDrillMain}|${drilldownMain}|${drillSub}` : '';
+      if (drillKey !== lastDrillKey) { closedDates = new Set(); lastDrillKey = drillKey; }
+      renderAccordion(applyDrillToList(list));
+    }
+
+    /** 소분류 줄을 누르면 거래내역을 그 소분류로 거른다 (다시 누르면 해제) */
+    function bindSubClicks(containerId) {
+      document.getElementById(containerId).querySelectorAll('[data-drill-sub]').forEach(el =>
+        el.addEventListener('click', () => setDrillSub(el.getAttribute('data-drill-sub'))));
+    }
+
+    /** 이 날짜 묶음이 열려 있는지: 소분류 보기 중엔 전부 펼침(접은 것만 제외), 평소엔 하나만 */
+    function isDateOpen(d) {
+      return lastDrillKey ? !closedDates.has(d) : openDate === d;
     }
 
     function renderAccordion(list) {
@@ -204,7 +226,7 @@
       dates.forEach(d => {
         const rows = groups[d];
         const daySum = rows.reduce((a,b) => a + b.금액, 0);
-        const isOpen = openDate === d;
+        const isOpen = isDateOpen(d);
         const icon = isOpen ? '▲' : '▼';
         const colorClass = daySum < 0 ? 'color:var(--danger)' : 'color:var(--ok)';
 
@@ -249,12 +271,16 @@
     // [PERF] 펼침/접힘은 해당 날짜 블록의 클래스만 바꾼다 (전체 재필터·재렌더 없음)
     function toggleAcc(dateStr) {
       const prev = openDate;
-      openDate = (openDate === dateStr) ? null : dateStr;
+      if (lastDrillKey) {
+        if (closedDates.has(dateStr)) closedDates.delete(dateStr); else closedDates.add(dateStr);
+      } else {
+        openDate = (openDate === dateStr) ? null : dateStr;
+      }
       if(currentSwipe) { currentSwipe.querySelector('.swipe-content').style.transform = 'translateX(0)'; currentSwipe = null; }
       document.querySelectorAll('#m-accordion .acc-group').forEach(g => {
         const d = g.getAttribute('data-date');
-        if (d !== prev && d !== openDate) return;
-        const isOpen = d === openDate;
+        if (d !== prev && d !== openDate && d !== dateStr) return;
+        const isOpen = isDateOpen(d);
         g.querySelector('.acc-body').classList.toggle('open', isOpen);
         g.querySelector('.acc-icon').textContent = isOpen ? '▲' : '▼';
       });
