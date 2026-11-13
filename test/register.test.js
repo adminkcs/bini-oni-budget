@@ -121,4 +121,17 @@ console.log('\n=== 정기 자동입력 거래 수정: 비고 표시 보존 ===')
   r.check('일반 거래는 손대지 않음', s3.calls[0].arg.비고, '메모');
 }
 
+console.log('\n=== 신규 등록 결제수단 기본값: 지출은 신용카드 ===');
+{
+  const tx = (결제수단, 구분 = '지출') => ({ 일련번호: 'x' + 결제수단, 날짜: '2026-10-01', 대분류: '생활', 소분류: '외식', 금액: -1000, 결제수단, 구분 });
+  const a = setup([tx('현금'), tx('체크카드')]);
+  a.ctx.openRegisterModal();
+  r.check('내역에 없어도 신용카드가 기본', a.el('reg-payment').value, '신용카드');
+  const b = setup([tx('현금'), tx('신용카드')]);
+  b.ctx.openRegisterModal();
+  r.check('내역에 있으면 그대로 선택', b.el('reg-payment').value, '신용카드');
+  b.ctx.setRegType('수입');
+  r.check('수입은 기존처럼 첫 항목', b.el('reg-payment').value, '현금');
+}
+
 r.done();

@@ -146,6 +146,7 @@
   let editingTxn = null;
   let categoryOptions = { 대분류: [], 소분류: [] };
   let paymentOptions = [];
+  const DEFAULT_EXPENSE_PAYMENT = '신용카드';
   let categoryMap = {};
   let subCatDescMap = {};
   let subCatPriorityMap = {}; // [신규] 소분류 → 우선순위(숫자). 신규 등록 select box 정렬 기준
@@ -519,10 +520,15 @@
   // ---------------------------------------------------------------------------
   // [STEP3B] 예산
   // ---------------------------------------------------------------------------
+  // 년월 칸을 비운 행은 '기본 예산'으로, 그 달 행이 없는 모든 달에 쓴다(2026-11-13 사용자 요청: 예산은 한 세트로 관리).
+  // 년월을 적은 행이 있으면 그 달만 그 값을 쓴다(예전 월별 데이터와도 호환).
+  const DEFAULT_BUDGET_KEY = '기본';
+
   function buildBudgetMap() {
     budgetMap = {};
     (rawData['예산_설정'] || []).forEach(r => {
-      const ym = normalizeYearMonth(r['년월']);
+      const rawYm = String(r['년월'] == null ? '' : r['년월']).trim();
+      const ym = rawYm === '' ? DEFAULT_BUDGET_KEY : normalizeYearMonth(rawYm);
       const main = String(r['대분류'] || '').trim();
       const amt = Math.abs(Number(r['예산액']) || 0);
       if (!ym || !main || amt <= 0) return;
@@ -547,8 +553,8 @@
   /** 선택된 달의 예산 대비 집행 현황을 계산한다. 예산이 없으면 빈 배열. */
   function getBudgetProgress() {
     const ym = currentYearMonth();
-    const budgets = budgetMap[ym];
-    if (!budgets || Object.keys(budgets).length === 0) return [];
+    const budgets = budgetMap[ym] || budgetMap[DEFAULT_BUDGET_KEY];
+    if (!ym || !budgets || Object.keys(budgets).length === 0) return [];
 
     // 집행액은 드릴다운/검색에 흔들리지 않도록 '해당 월 전체 지출' 기준으로 계산한다
     const spent = {};
@@ -611,9 +617,9 @@
     const rows = getBudgetProgress();
     if (rows.length === 0) {
       return '<div style="color:var(--text-dim); font-size:13px; line-height:1.7;">' +
-             '이 달의 예산이 설정되지 않았습니다.<br>' +
+             '예산이 설정되지 않았습니다.<br>' +
              '시트 메뉴 <b>[가계부 도구 &gt; 관리 &gt; 예산 시트 만들기]</b>로 <b>예산_설정</b> 시트를 만든 뒤 ' +
-             '년월·대분류·예산액을 입력하세요.</div>';
+             '대분류·예산액을 입력하세요. 년월 칸은 비워 두면 매달 같은 예산을 씁니다.</div>';
     }
     return rows.map(r => {
       const color = budgetColor(r.비율);
@@ -1111,9 +1117,14 @@
   function renderPaymentOptions() {
     const sel = document.getElementById('reg-payment');
     sel.innerHTML = '';
-    paymentOptions.forEach(p => sel.appendChild(new Option(p, p)));
+    // 지출 신규 등록은 신용카드를 기본으로 고른다(2026-11-13 사용자 요청). 내역에 아직 없으면 목록 맨 앞에 넣는다.
+    // 수정·빠른 입력·임시 저장 불러오기는 이 뒤에 각자 값을 다시 넣으므로 영향 없다.
+    const isExpense = regType === '지출';
+    const opts = (isExpense && !paymentOptions.includes(DEFAULT_EXPENSE_PAYMENT))
+      ? [DEFAULT_EXPENSE_PAYMENT].concat(paymentOptions) : paymentOptions;
+    opts.forEach(p => sel.appendChild(new Option(p, p)));
     sel.appendChild(new Option('직접 입력', '__etc__'));
-    sel.value = paymentOptions[0] || '__etc__';
+    sel.value = isExpense ? DEFAULT_EXPENSE_PAYMENT : (paymentOptions[0] || '__etc__');
     onRegPaymentChange();
   }
 

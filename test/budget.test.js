@@ -46,6 +46,24 @@ console.log('\n=== 예산 집행률 ===');
   r.check('초과 항목이 먼저 정렬됨', p[0].대분류, '주거');
 }
 
+console.log('\n=== 기본 예산 (년월 빈 칸) — 매달 같은 예산 ===');
+{
+  const rows = [tx('2026-10-03', '식비', '외식', -300000), tx('2026-11-03', '식비', '외식', -150000)];
+  const budgets = [{ 년월: '', 대분류: '식비', 예산액: 600000 }, { 대분류: '주거', 예산액: 800000 },
+                   { 년월: '2026-11', 대분류: '식비', 예산액: 200000 }];
+  const oct = setup(rows, budgets, '2026-10');
+  const p10 = oct.getBudgetProgress();
+  r.check('년월 없는 달은 기본 예산 사용', p10.find(x => x.대분류 === '식비').예산, 600000);
+  r.check('년월 칸이 아예 없는 행도 기본', p10.find(x => x.대분류 === '주거').예산, 800000);
+  r.check('집행은 그 달 지출만', p10.find(x => x.대분류 === '식비').집행, 300000);
+  const nov = setup(rows, budgets, '2026-11');
+  const p11 = nov.getBudgetProgress();
+  r.check('년월 적은 달은 그 달 예산 우선', p11.find(x => x.대분류 === '식비').예산, 200000);
+  r.check('그 달 예산은 그 달 행만 (기본과 섞지 않음)', p11.length, 1);
+  const none = setup(rows, budgets, '');
+  r.check('달이 정해지지 않으면 표시 안 함', none.getBudgetProgress().length, 0);
+}
+
 console.log('\n=== 집행률 색상 임계값 ===');
 {
   const ctx = loadCommon();

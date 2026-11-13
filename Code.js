@@ -13,7 +13,7 @@ var SHEET_REGULAR = "정기_수입지출_설정_및_휴일기준";
 var SHEET_CATEGORY = "분류_설정";
 
 var SHEET_RUNLOG = "실행로그";
-var SHEET_BUDGET = "예산_설정";   // [STEP3B] 년월 / 대분류 / 예산액
+var SHEET_BUDGET = "예산_설정";   // [STEP3B] 년월(비우면 매달) / 대분류 / 예산액
 
 var NOTE_PREFIX_EXPENSE = "정기지출 자동입력";
 var NOTE_PREFIX_INCOME = "정기수입 자동입력";
@@ -992,7 +992,6 @@ function onOpen() {
   ui.createMenu('가계부 도구')
     .addItem('지금 백업하기 (권한 다시 승인도 여기서)', 'backupNow')
     .addItem('오늘 정기 항목 지금 입력하기', 'insertRegularExpenses')
-    .addItem('지난달 예산을 이번 달로 복사', 'copyBudgetToNewMonth')
     .addSeparator()
     .addSubMenu(ui.createMenu('점검')
       .addItem('설정값(스크립트 속성) 확인', 'setupScriptProperties')
@@ -1290,7 +1289,7 @@ function ensureTxnColumnFormats(sheet) {
  * ==============================================================================
  * ★ [STEP3B] 예산 시트 생성/점검
  * '예산_설정' 시트를 만들고 헤더와 설명을 세팅한다. 이미 있으면 건드리지 않는다.
- *   년월: "2026-09" 형식 (해당 월에만 적용)
+ *   년월: 비우면 매달 쓰는 기본 예산. "2026-09"처럼 적으면 그 달에만 적용
  *   대분류: '분류_설정'의 대분류명과 정확히 일치해야 매칭된다
  *   예산액: 양수로 입력 (지출 예산)
  * ==============================================================================
@@ -1325,9 +1324,10 @@ function ensureBudgetSheet() {
   var msg = (created ? "'" + SHEET_BUDGET + "' 시트를 만들었습니다.\n\n" : "'" + SHEET_BUDGET + "' 시트가 이미 있습니다.\n\n") +
     "입력 예시\n" +
     "  년월      대분류        예산액\n" +
-    "  2026-09   생활          600000\n" +
-    "  2026-09   주거          800000\n\n" +
-    "· 년월은 'YYYY-MM' 형식으로 입력합니다.\n" +
+    "  (비움)    생활          600000\n" +
+    "  (비움)    주거          800000\n\n" +
+    "· 년월을 비워 두면 매달 같은 예산을 씁니다. 보통은 이렇게 한 세트만 둡니다.\n" +
+    "· 특정 달만 다르게 하려면 년월에 'YYYY-MM'을 적은 행을 추가합니다.\n" +
     "· 대분류는 분류_설정의 이름과 정확히 같게 입력합니다.\n" +
     "· 예산액은 양수로 입력합니다.\n" +
     "· 입력 후 대시보드를 새로고침하면 집행률이 표시됩니다.";
@@ -1337,84 +1337,12 @@ function ensureBudgetSheet() {
 }
 
 /**
- * ==============================================================================
- * ★ [STEP3B] 예산 자동 복사 (매월 1일 00~01시 트리거로 실행)
- * 지난달 '예산_설정' 행(대분류/예산액)을 이번 달로 그대로 복사한다.
- * 이번 달 행이 이미 하나라도 있으면 건너뛴다(중복 방지 + 수동으로 이미
- * 다르게 설정한 예산을 덮어쓰지 않기 위함). 수동 메뉴로도 실행할 수 있다.
- * ==============================================================================
+ * 예산 매월 복사는 없앴다(2026-11-13). 예산_설정에서 년월을 비운 행 한 세트를 매달 쓰므로
+ * 지난달 행을 복사할 필요가 없다. installTriggers를 다시 실행하기 전까지 남아 있는 옛 매월 1일
+ * 트리거가 '함수 없음' 오류 메일을 보내지 않도록 이름만 남겨 둔다.
  */
 function copyBudgetToNewMonth() {
-  var ui = null;
-  try { ui = SpreadsheetApp.getUi(); } catch (e) { ui = null; }
-
-  var lock = LockService.getScriptLock();
-  if (!lock.tryLock(30000)) {
-    Logger.log("[예산 자동 복사] 다른 작업 실행 중");
-    if (ui) ui.alert("다른 작업이 실행 중입니다. 잠시 후 다시 시도하세요.");
-    return;
-  }
-
-  try {
-    var today = getTodayInfo();
-    var curYm = today.year + "-" + String(today.month).padStart(2, "0");
-    var prevDate = new Date(Date.UTC(today.year, today.month - 1, 0)); // 이번 달 1일 - 1일 = 지난달 말일
-    var prevYm = prevDate.getUTCFullYear() + "-" + String(prevDate.getUTCMonth() + 1).padStart(2, "0");
-
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sheet = ss.getSheetByName(SHEET_BUDGET);
-    if (!sheet || sheet.getLastRow() <= 1) {
-      var noSheetMsg = "'" + SHEET_BUDGET + "' 시트가 없거나 비어 있어 복사할 예산이 없습니다.";
-      Logger.log("[예산 자동 복사] " + noSheetMsg);
-      if (ui) ui.alert(noSheetMsg);
-      return;
-    }
-
-    var values = sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getValues();
-    var hasCurrent = false;
-    var prevRows = [];
-    values.forEach(function (row) {
-      var ym = normalizeYearMonthServer(row[0]);
-      if (ym === curYm) hasCurrent = true;
-      else if (ym === prevYm) prevRows.push(row);
-    });
-
-    if (hasCurrent) {
-      var skipMsg = curYm + " 예산이 이미 있어 자동 복사를 건너뜁니다.";
-      Logger.log("[예산 자동 복사] " + skipMsg);
-      if (ui) ui.alert(skipMsg);
-      return;
-    }
-    if (prevRows.length === 0) {
-      var noneMsg = prevYm + " 예산이 없어 복사할 내용이 없습니다.";
-      Logger.log("[예산 자동 복사] " + noneMsg);
-      if (ui) ui.alert(noneMsg);
-      return;
-    }
-
-    var newRows = prevRows.map(function (row) { return [curYm, row[1], row[2]]; });
-    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, 3).setValues(newRows);
-
-    var doneMsg = prevYm + " 예산 " + newRows.length + "건을 " + curYm + "로 복사했습니다.";
-    Logger.log("[예산 자동 복사] " + doneMsg);
-    logRun("copyBudgetToNewMonth", "성공", newRows.length, doneMsg);
-    if (ui) ui.alert("완료", doneMsg, ui.ButtonSet.OK);
-
-  } catch (err) {
-    logRun("copyBudgetToNewMonth", "실패", 0, err.message);
-    notifyFailure("copyBudgetToNewMonth", err);
-    if (ui) ui.alert("오류", err.message, ui.ButtonSet.OK);
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-/** 예산_설정 '년월' 셀(Date 객체 또는 다양한 문자열)을 'YYYY-MM'으로 통일한다 */
-function normalizeYearMonthServer(v) {
-  if (!v) return "";
-  if (v instanceof Date) return fmtDate(v).substring(0, 7);
-  var m = String(v).trim().match(/^(\d{4})[-./]?(\d{1,2})/);
-  return m ? m[1] + "-" + String(m[2]).padStart(2, "0") : "";
+  Logger.log("[예산] 매월 복사는 더 이상 하지 않습니다. 자동 실행 다시 설치(installTriggers)로 옛 트리거를 정리하세요.");
 }
 
 /**
@@ -1556,8 +1484,6 @@ function installTriggers() {
     // 이관 대상이 없으면 백업도 락도 잡지 않고 즉시 끝나므로 매월 돌아도 부담이 없다.
     // 실제 작업은 해가 바뀐 뒤 한 번만 일어난다. (백업 03시 이후로 배치)
     { fn: 'scheduledArchiveOldTransactions', monthDay: 2, hour: 4, desc: '과거 데이터 자동 이관 (매월 2일 04~05시)' },
-    // [STEP3B] 이번 달 예산이 이미 있으면 아무 것도 하지 않으므로 매월 돌아도 안전하다.
-    { fn: 'copyBudgetToNewMonth', monthDay: 1, hour: 0, desc: '예산 지난달 값 자동 복사 (매월 1일 00~01시)' },
     // [신규] 매일 자동입력(insertRegularExpenses)은 그대로 두고, 매월 1일에 이번 달 전체
     // 분량을 한 번에 미리 등록한다. 멱등성 키가 동일해 매일 트리거와 겹쳐도 중복되지 않는다.
     { fn: 'insertRegularExpensesForMonth', monthDay: 1, hour: 1, desc: '정기 항목 이번 달 일괄 등록 (매월 1일 01~02시)' }
